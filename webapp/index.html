@@ -5,332 +5,374 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Лавка Странника</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Marck+Script&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#0d0a08;
-  --bg2:#171210;
-  --parch:#1f1813;
-  --gold:#c9a227;
-  --gold-dim:#8a6f1e;
-  --ember:#e07b39;
+  --bg-sky:#0a0a1a;
+  --bg-deep:#0d0503;
+  --pixel:#c9a227;
+  --pixel-dim:#8a6f1e;
   --text:#e8dcc4;
   --muted:#9a8a6f;
-  --danger:#8a2f2f;
-  --border:rgba(201,162,39,.22);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html{scroll-behavior:smooth}
 body{
-  background:var(--bg);
+  background:var(--bg-sky);
   color:var(--text);
-  font-family:'Cormorant Garamond', serif;
-  min-height:100vh;
+  font-family:'Press Start 2P',monospace;
+  font-size:12px;
+  line-height:1.6;
   overflow-x:hidden;
-  background-image:
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(224,123,57,.10), transparent),
-    radial-gradient(ellipse 60% 40% at 50% 110%, rgba(201,162,39,.06), transparent);
 }
-/* Мерцание свечного света */
-body::before{
-  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
-  background:radial-gradient(circle at 50% 30%, rgba(224,123,57,.05), transparent 60%);
-  animation:flicker 4s ease-in-out infinite;
-}
-@keyframes flicker{
-  0%,100%{opacity:.7}
-  30%{opacity:1}
-  55%{opacity:.5}
-  70%{opacity:.9}
-  85%{opacity:.6}
-}
-.container{max-width:520px;margin:0 auto;padding:0 16px 140px;position:relative;z-index:1}
+canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+.container{max-width:480px;margin:0 auto;position:relative;z-index:1}
 
-/* Шапка */
-header{padding:34px 0 8px;text-align:center}
-.rune{font-size:34px;display:block;animation:candle 2.6s ease-in-out infinite;filter:drop-shadow(0 0 14px rgba(224,123,57,.7))}
-@keyframes candle{0%,100%{transform:scale(1) rotate(-1deg)}50%{transform:scale(1.08) rotate(1deg)}}
-h1{
-  font-family:'Marck Script', cursive;
-  font-size:38px;font-weight:400;color:var(--gold);
-  text-shadow:0 0 24px rgba(201,162,39,.35);
-  margin-top:8px;letter-spacing:.02em;
-}
-.subtitle{font-style:italic;color:var(--muted);font-size:16px;margin-top:4px}
-.divider{display:flex;align-items:center;gap:12px;margin:22px 0 18px;color:var(--gold-dim)}
-.divider::before,.divider::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent)}
-.divider span{font-size:15px;letter-spacing:.25em;text-transform:uppercase}
+.hero{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}
+#towerCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:0}
+.title{position:relative;z-index:2;text-align:center;color:#fff;text-shadow:4px 4px 0 #000,0 0 20px rgba(201,162,39,.5);font-size:20px;letter-spacing:2px;line-height:2;animation:glow 2s ease-in-out infinite}
+@keyframes glow{0%,100%{text-shadow:4px 4px 0 #000,0 0 20px rgba(201,162,39,.5)}50%{text-shadow:4px 4px 0 #000,0 0 40px rgba(201,162,39,.8)}}
+.subtitle{position:relative;z-index:2;color:var(--muted);font-size:8px;margin-top:14px;letter-spacing:4px}
+.scroll-hint{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);color:var(--pixel);font-size:9px;animation:bob 1.5s ease-in-out infinite;z-index:2;text-align:center;line-height:2}
+@keyframes bob{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(8px)}}
 
-/* Категории */
-.tabs{display:flex;gap:8px;margin-bottom:18px;overflow-x:auto;padding-bottom:4px}
-.tab{
-  flex-shrink:0;padding:8px 18px;border-radius:999px;cursor:pointer;
-  background:var(--bg2);border:1px solid var(--border);color:var(--muted);
-  font-family:inherit;font-size:16px;transition:all .25s;
-}
-.tab.active{color:var(--gold);border-color:var(--gold);background:rgba(201,162,39,.08);box-shadow:0 0 16px rgba(201,162,39,.15)}
+.depth{height:70vh;position:relative}
+#depthCanvas{position:absolute;inset:0;width:100%;height:100%}
 
-/* Карточка товара */
+.shop{background:var(--bg-deep);padding:20px 16px 140px;position:relative}
+.section-title{text-align:center;color:var(--pixel);font-size:13px;margin-bottom:30px;text-shadow:2px 2px 0 #000}
+.section-title::before,.section-title::after{content:'<>';color:var(--pixel-dim);margin:0 12px}
+
 .card{
-  background:linear-gradient(145deg,var(--parch),var(--bg2));
-  border:1px solid var(--border);border-radius:14px;
-  padding:16px;margin-bottom:14px;display:flex;gap:14px;
-  box-shadow:0 4px 24px rgba(0,0,0,.5), inset 0 0 40px rgba(0,0,0,.3);
-  position:relative;overflow:hidden;
-  animation:appear .4s ease both;
+  background:rgba(20,14,10,.75);
+  backdrop-filter:blur(6px);
+  -webkit-backdrop-filter:blur(6px);
+  border:4px solid var(--pixel);
+  padding:14px;
+  margin-bottom:24px;
+  box-shadow:8px 8px 0 rgba(0,0,0,.5), inset 0 0 30px rgba(0,0,0,.4);
 }
-@keyframes appear{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-.card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(201,162,39,.5),transparent);
-}
-.card .glyph{
-  width:58px;height:58px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
-  font-size:32px;background:radial-gradient(circle,rgba(201,162,39,.14),transparent 70%);
-  border-radius:50%;border:1px solid var(--border);
-}
-.card .info{flex:1;min-width:0}
-.card h3{font-size:19px;font-weight:700;color:var(--text)}
-.card p{font-size:15px;color:var(--muted);font-style:italic;margin:3px 0 8px;line-height:1.35}
-.price-row{display:flex;align-items:center;justify-content:space-between}
-.price{font-size:19px;font-weight:700;color:var(--gold)}
-.price small{font-size:14px;color:var(--gold-dim)}
-.stock{font-size:13px;color:var(--muted);font-style:italic}
-.add-btn{
-  background:linear-gradient(145deg,#3a2c12,#241b0c);
-  color:var(--gold);border:1px solid var(--gold-dim);border-radius:10px;
-  font-family:inherit;font-size:16px;font-weight:700;
-  padding:8px 16px;cursor:pointer;transition:all .2s;
-}
-.add-btn:active{transform:scale(.94);box-shadow:0 0 18px rgba(201,162,39,.4)}
-.add-btn.added{background:var(--gold);color:#1a1207}
+.card-head{display:flex;align-items:center;gap:14px;margin-bottom:12px}
+.pixel-icon{width:64px;height:64px;background:#000;border:2px solid var(--pixel);flex-shrink:0}
+.card h3{color:#fff;font-size:11px;text-shadow:2px 2px 0 #000;line-height:1.8}
+.card-desc{color:var(--muted);font-size:9px;line-height:1.9;margin-bottom:14px}
+.card-foot{display:flex;justify-content:space-between;align-items:center}
+.price{color:var(--pixel);font-size:13px;text-shadow:2px 2px 0 #000}
+.buy-btn{background:var(--pixel);color:#1a1207;border:none;font-family:inherit;font-size:10px;padding:10px 18px;cursor:pointer;box-shadow:4px 4px 0 var(--pixel-dim)}
+.buy-btn:active{transform:translate(2px,2px);box-shadow:2px 2px 0 var(--pixel-dim)}
 
-/* Корзина (нижняя панель) */
-.cart-bar{
-  position:fixed;bottom:0;left:0;right:0;z-index:10;
-  background:linear-gradient(180deg,transparent,var(--bg) 20%);
-  padding:24px 16px 20px;
-}
-.cart-inner{max-width:520px;margin:0 auto}
-.cart-btn{
-  width:100%;padding:15px;border-radius:14px;cursor:pointer;border:1px solid var(--gold);
-  background:linear-gradient(145deg,#4a3815,#2c2110);
-  color:var(--gold);font-family:inherit;font-size:18px;font-weight:700;letter-spacing:.03em;
-  box-shadow:0 0 26px rgba(201,162,39,.25);
-  display:flex;justify-content:space-between;align-items:center;
-}
-.cart-btn:active{transform:scale(.98)}
-.cart-count{background:var(--gold);color:#1a1207;border-radius:999px;padding:2px 12px;font-size:16px}
+.bottom-bar{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,var(--bg-deep) 35%);padding:20px;z-index:10}
+.cart-btn{width:100%;max-width:440px;margin:0 auto;display:block;background:var(--pixel);color:#1a1207;border:none;font-family:inherit;font-size:11px;padding:16px;cursor:pointer;box-shadow:6px 6px 0 var(--pixel-dim)}
+.cart-btn:active{transform:translate(3px,3px);box-shadow:3px 3px 0 var(--pixel-dim)}
 
-/* Модалка заказа */
-.overlay{
-  position:fixed;inset:0;background:rgba(5,3,2,.82);z-index:20;
-  display:none;align-items:flex-end;justify-content:center;backdrop-filter:blur(3px);
-}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:20;display:none;align-items:center;justify-content:center;padding:20px}
 .overlay.open{display:flex}
-.sheet{
-  width:100%;max-width:520px;background:var(--parch);
-  border:1px solid var(--border);border-bottom:none;border-radius:20px 20px 0 0;
-  padding:22px 20px 34px;max-height:82vh;overflow-y:auto;
-  animation:rise .3s ease;
-}
-@keyframes rise{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
-.sheet h2{font-family:'Marck Script',cursive;font-size:28px;color:var(--gold);text-align:center;margin-bottom:12px}
-.cart-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px dashed var(--border);font-size:17px}
-.cart-item .qty-ctl{display:flex;align-items:center;gap:10px}
-.cart-item button{
-  width:28px;height:28px;border-radius:8px;border:1px solid var(--border);
-  background:var(--bg2);color:var(--gold);font-size:17px;cursor:pointer;font-family:inherit;
-}
-.total-row{display:flex;justify-content:space-between;font-size:21px;font-weight:700;color:var(--gold);margin:16px 0}
-textarea{
-  width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;
-  color:var(--text);font-family:inherit;font-size:16px;padding:12px;resize:none;
-  font-style:italic;margin-bottom:14px;
-}
-textarea::placeholder{color:var(--muted)}
-textarea:focus{outline:none;border-color:var(--gold)}
-.order-btn{
-  width:100%;padding:15px;border-radius:12px;border:none;cursor:pointer;
-  background:linear-gradient(145deg,var(--gold),var(--gold-dim));
-  color:#1a1207;font-family:inherit;font-size:18px;font-weight:700;letter-spacing:.03em;
-  box-shadow:0 0 22px rgba(201,162,39,.35);
-}
-.order-btn:active{transform:scale(.98)}
-.order-btn:disabled{opacity:.5}
-.close-x{float:right;background:none;border:none;color:var(--muted);font-size:26px;cursor:pointer;font-family:inherit}
-
-/* Успех */
-.success{text-align:center;padding:30px 10px}
-.success .sigil{font-size:56px;animation:candle 2s ease-in-out infinite;filter:drop-shadow(0 0 20px rgba(224,123,57,.8))}
-.success h2{margin:14px 0 8px}
-.success p{color:var(--muted);font-style:italic;font-size:16px}
-
-.empty{text-align:center;color:var(--muted);font-style:italic;padding:40px 0;font-size:17px}
-.toast{
-  position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:30;
-  background:var(--parch);border:1px solid var(--gold);color:var(--gold);
-  padding:10px 22px;border-radius:999px;font-size:16px;
-  opacity:0;transition:opacity .3s;pointer-events:none;
-  box-shadow:0 0 20px rgba(201,162,39,.3);
-}
-.toast.show{opacity:1}
+.modal{background:#140e0a;border:4px solid var(--pixel);padding:22px;max-width:400px;width:100%;box-shadow:12px 12px 0 rgba(0,0,0,.8)}
+.modal h2{color:var(--pixel);font-size:13px;margin-bottom:18px;text-align:center;line-height:1.8}
+.cart-item{display:flex;justify-content:space-between;padding:10px 0;border-bottom:2px dashed var(--pixel-dim);font-size:9px;line-height:1.8}
+.qty-ctl{display:flex;align-items:center;gap:8px}
+.qty-ctl button{width:22px;height:22px;background:#000;border:2px solid var(--pixel-dim);color:var(--pixel);font-family:inherit;font-size:10px;cursor:pointer}
+.total{color:var(--pixel);font-size:13px;text-align:right;margin:16px 0}
+.modal-btn{width:100%;background:var(--pixel);color:#1a1207;border:none;font-family:inherit;font-size:10px;padding:14px;cursor:pointer;margin-top:8px;line-height:1.8}
+.close-x{float:right;background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;font-family:inherit}
+.success{text-align:center;padding:20px}
+.success-icon{font-size:40px;margin-bottom:16px;animation:glow 1.5s ease-in-out infinite}
 </style>
 </head>
 <body>
 
 <div class="container">
-  <header>
-    <span class="rune">🕯️</span>
-    <h1>Лавка Странника</h1>
-    <div class="subtitle">зелья · свечи · реликвии дальних земель</div>
-  </header>
+  <section class="hero">
+    <canvas id="towerCanvas"></canvas>
+    <h1 class="title">ЛАВКА<br>СТРАННИКА</h1>
+    <div class="subtitle">ЗЕЛЬЯ · СВЕЧИ · РЕЛИКВИИ</div>
+    <div class="scroll-hint">▼<br>СПУСТИСЬ<br>В НЕДРА<br>▼</div>
+  </section>
 
-  <div class="divider"><span>Товары</span></div>
+  <section class="depth">
+    <canvas id="depthCanvas"></canvas>
+  </section>
 
-  <div class="tabs" id="tabs"></div>
-  <div id="catalog"></div>
+  <section class="shop">
+    <div class="section-title">ТОВАРЫ</div>
+    <div id="catalog"></div>
+  </section>
 </div>
 
-<div class="cart-bar">
-  <div class="cart-inner">
-    <button class="cart-btn" id="cartBtn" onclick="openCart()">
-      <span>🧺 Сумка странника</span>
-      <span class="cart-count" id="cartCount">0</span>
-    </button>
-  </div>
+<div class="bottom-bar">
+  <button class="cart-btn" onclick="openCart()">СУМКА СТРАННИКА [<span id="cartCount">0</span>]</button>
 </div>
 
 <div class="overlay" id="overlay" onclick="if(event.target===this)closeCart()">
-  <div class="sheet" id="sheet"></div>
+  <div class="modal" id="modal"></div>
 </div>
-
-<div class="toast" id="toast"></div>
 
 <script>
 const tg = window.Telegram?.WebApp;
-if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#0d0a08'); tg.setBackgroundColor('#0d0a08'); }
+if (tg){ tg.ready(); tg.expand(); tg.setHeaderColor('#0a0a1a'); tg.setBackgroundColor('#0a0a1a'); }
 
-const CATS = { all:'Всё', candles:'🕯️ Свечи', potions:'⚗️ Зелья', relics:'📜 Реликвии' };
-let products = [];
-let cart = {};          // id -> qty
-let activeCat = 'all';
+/* ===== БАШНЯ С ЛУГОМ ===== */
+const tc = document.getElementById('towerCanvas');
+const tctx = tc.getContext('2d');
+const S = 4;
 
-async function loadProducts(){
-  const res = await fetch('/api/products');
-  products = await res.json();
-  renderTabs(); renderCatalog();
+function drawTower(){
+  tc.width = tc.offsetWidth / S;
+  tc.height = tc.offsetHeight / S;
+  const w = tc.width, h = tc.height;
+  const cx = w/2, gy = h*0.82;
+
+  tctx.fillStyle = '#0a0a1a';
+  tctx.fillRect(0,0,w,h);
+
+  // звёзды
+  tctx.fillStyle = '#fff';
+  let seed = 7;
+  const rnd = ()=>{ seed = (seed*16807)%2147483647; return seed/2147483647; };
+  for(let i=0;i<60;i++){
+    const x=rnd()*w, y=rnd()*h*0.5;
+    tctx.fillRect(x,y, rnd()<0.85?1:2, rnd()<0.85?1:2);
+  }
+
+  // луна
+  tctx.fillStyle = '#e8dcc4';
+  tctx.beginPath(); tctx.arc(w*0.78, h*0.14, 7, 0, 7); tctx.fill();
+  tctx.fillStyle = '#0a0a1a';
+  tctx.beginPath(); tctx.arc(w*0.81, h*0.12, 6, 0, 7); tctx.fill();
+
+  // луг
+  tctx.fillStyle = '#16301b';
+  tctx.fillRect(0, gy, w, h-gy);
+  tctx.fillStyle = '#265028';
+  for(let i=0;i<w;i+=2){ if(rnd()<0.4) tctx.fillRect(i, gy-2, 1, 2); }
+  // цветы на лугу
+  tctx.fillStyle = '#8a2f5f';
+  for(let i=0;i<14;i++){ const x=rnd()*w; tctx.fillRect(x, gy+3+rnd()*10, 1, 1); }
+
+  // башня
+  const tw = 26, th = h*0.55;
+  const tx = cx - tw/2, ty = gy - th;
+  tctx.fillStyle = '#1c1c30';
+  tctx.fillRect(tx, ty, tw, th);
+  // кирпичная кладка
+  tctx.fillStyle = '#242440';
+  for(let y=ty+4; y<gy; y+=6){
+    for(let x=tx+((y/6)%2?0:3); x<tx+tw-2; x+=6){ tctx.fillRect(x, y, 4, 1); }
+  }
+  // крыша
+  tctx.fillStyle = '#16213e';
+  tctx.beginPath();
+  tctx.moveTo(tx-5, ty); tctx.lineTo(cx, ty-18); tctx.lineTo(tx+tw+5, ty);
+  tctx.closePath(); tctx.fill();
+  // флаг
+  tctx.fillStyle = '#5a5a5a';
+  tctx.fillRect(cx-1, ty-30, 1, 12);
+  tctx.fillStyle = '#8a2f2f';
+  tctx.fillRect(cx, ty-30, 7, 5);
+  // окна (тёплый свет)
+  tctx.fillStyle = '#e8b83a';
+  tctx.fillRect(tx+5,  ty+16, 4, 7);
+  tctx.fillRect(tx+17, ty+16, 4, 7);
+  tctx.fillRect(tx+11, ty+34, 4, 7);
+  tctx.fillRect(tx+5,  ty+52, 4, 7);
+  tctx.fillRect(tx+17, ty+52, 4, 7);
+  // дверь
+  tctx.fillStyle = '#3a2618';
+  tctx.fillRect(cx-4, gy-12, 8, 12);
+  tctx.fillStyle = '#e8b83a';
+  tctx.fillRect(cx+1, gy-7, 1, 1);
+  // свет от двери на луг
+  const g = tctx.createRadialGradient(cx, gy, 0, cx, gy, 36);
+  g.addColorStop(0, 'rgba(232,184,58,.18)');
+  g.addColorStop(1, 'transparent');
+  tctx.fillStyle = g;
+  tctx.fillRect(0, gy-30, w, 40);
 }
 
-function renderTabs(){
-  const tabs = document.getElementById('tabs');
-  tabs.innerHTML = Object.entries(CATS).map(([k,v]) =>
-    `<div class="tab ${k===activeCat?'active':''}" onclick="setCat('${k}')">${v}</div>`).join('');
+/* ===== СПУСК В НЕДРА ===== */
+const dc = document.getElementById('depthCanvas');
+const dctx = dc.getContext('2d');
+
+function drawDepth(){
+  dc.width = dc.offsetWidth / S;
+  dc.height = dc.offsetHeight / S;
+  const w = dc.width, h = dc.height;
+
+  // градиент: небо -> земля -> недра
+  const g = dctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0, '#0a0a1a');
+  g.addColorStop(0.25, '#1a0f0a');
+  g.addColorStop(0.6, '#140b06');
+  g.addColorStop(1, '#0d0503');
+  dctx.fillStyle = g;
+  dctx.fillRect(0,0,w,h);
+
+  let seed = 13;
+  const rnd = ()=>{ seed = (seed*16807)%2147483647; return seed/2147483647; };
+
+  // корни сверху
+  dctx.fillStyle = '#2a1a10';
+  for(let i=0;i<12;i++){
+    const x = rnd()*w, len = 8+rnd()*18;
+    dctx.fillRect(x, h*0.2, 1, len);
+    dctx.fillRect(x, h*0.2+len, 2, 1);
+  }
+  // каменные слои
+  dctx.fillStyle = '#241812';
+  for(let i=0;i<40;i++){
+    dctx.fillRect(rnd()*w, h*0.3+rnd()*h*0.6, 3+rnd()*6, 2+rnd()*3);
+  }
+  // светящиеся кристаллы в недрах
+  dctx.fillStyle = '#7a5fd0';
+  for(let i=0;i<8;i++){
+    const x=rnd()*w, y=h*0.55+rnd()*h*0.4;
+    dctx.fillRect(x,y,2,3); dctx.fillRect(x+1,y-1,1,1);
+  }
+  // глаза во тьме
+  dctx.fillStyle = '#d03a3a';
+  for(let i=0;i<3;i++){
+    const x=rnd()*w, y=h*0.7+rnd()*h*0.25;
+    dctx.fillRect(x,y,1,1); dctx.fillRect(x+3,y,1,1);
+  }
 }
-function setCat(k){ activeCat = k; renderTabs(); renderCatalog(); }
+
+/* ===== ТОВАРЫ ===== */
+const products = [
+  { id:1, name:'GEMINI', desc:'Двойная сущность. Пиксельный артефакт из недр земли. Доступ 18M.', price:40,
+    color:'#c9a227', pixels:[
+    [1,0,0,1,1,0,0,1],
+    [0,1,0,1,1,0,1,0],
+    [0,0,1,1,1,1,0,0],
+    [1,1,1,1,1,1,1,1],
+    [1,1,1,1,1,1,1,1],
+    [0,0,1,1,1,1,0,0],
+    [0,1,0,1,1,0,1,0],
+    [1,0,0,1,1,0,0,1]
+  ]},
+  { id:2, name:'СВЕЧА ТАВЕРНЫ', desc:'Тёплый свет для странника. Горит 40 часов.', price:120,
+    color:'#e07b39', pixels:[
+    [0,0,0,1,0,0,0,0],
+    [0,0,1,1,1,0,0,0],
+    [0,0,1,1,1,0,0,0],
+    [0,1,1,1,1,1,0,0],
+    [0,1,1,1,1,1,0,0],
+    [0,1,1,1,1,1,0,0],
+    [1,1,1,1,1,1,1,0],
+    [0,1,1,1,1,1,0,0]
+  ]},
+  { id:3, name:'ЭЛИКСИР БОДРОСТИ', desc:'Зелье алхимика. Кофеин и капля безумия.', price:90,
+    color:'#4a9b4a', pixels:[
+    [0,0,1,1,1,1,0,0],
+    [0,0,0,1,1,0,0,0],
+    [0,1,1,1,1,1,1,0],
+    [1,1,0,1,1,0,1,1],
+    [1,1,1,1,1,1,1,1],
+    [1,1,1,0,1,1,1,1],
+    [0,1,1,1,1,1,1,0],
+    [0,0,1,1,1,1,0,0]
+  ]},
+];
+
+let cart = {};
+
+function drawIcon(id, pixels, color){
+  const c = document.getElementById(id);
+  const x = c.getContext('2d');
+  c.width = 8; c.height = 8;
+  x.fillStyle = '#000';
+  x.fillRect(0,0,8,8);
+  x.fillStyle = color;
+  for(let r=0;r<8;r++) for(let col=0;col<8;col++) if(pixels[r][col]) x.fillRect(col,r,1,1);
+}
 
 function renderCatalog(){
-  const el = document.getElementById('catalog');
-  const list = products.filter(p => activeCat==='all' || p.category===activeCat);
-  el.innerHTML = list.length ? list.map(p => `
+  document.getElementById('catalog').innerHTML = products.map(p => `
     <div class="card">
-      <div class="glyph">${p.emoji}</div>
-      <div class="info">
-        <h3>${esc(p.name)}</h3>
-        <p>${esc(p.description||'')}</p>
-        <div class="price-row">
-          <div><span class="price">${p.price} <small>🪙</small></span>
-               <span class="stock"> · осталось ${p.stock}</span></div>
-          <button class="add-btn" id="add-${p.id}" onclick="addToCart(${p.id})">В сумку</button>
-        </div>
+      <div class="card-head">
+        <canvas class="pixel-icon" id="icon-${p.id}"></canvas>
+        <h3>${p.name}</h3>
       </div>
-    </div>`).join('') : '<div class="empty">Полки пусты… Странник ещё не вернулся из похода.</div>';
+      <div class="card-desc">${p.desc}</div>
+      <div class="card-foot">
+        <span class="price">${p.price} ₽</span>
+        <button class="buy-btn" data-id="${p.id}">КУПИТЬ</button>
+      </div>
+    </div>`).join('');
+  products.forEach(p => drawIcon(`icon-${p.id}`, p.pixels, p.color));
+  document.querySelectorAll('.buy-btn').forEach(b =>
+    b.addEventListener('click', () => addToCart(+b.dataset.id)));
 }
-function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
 function addToCart(id){
   cart[id] = (cart[id]||0)+1;
-  updateCartBar();
-  const b = document.getElementById('add-'+id);
-  b.textContent='✓ В сумке'; b.classList.add('added');
-  setTimeout(()=>{ b.textContent='В сумку'; b.classList.remove('added'); }, 900);
+  updateCart();
   tg?.HapticFeedback?.impactOccurred('light');
 }
-function cartTotal(){
-  return Object.entries(cart).reduce((s,[id,q])=>{
-    const p = products.find(x=>x.id==id); return s + (p? p.price*q : 0);
-  },0);
-}
+
 function cartCount(){ return Object.values(cart).reduce((a,b)=>a+b,0); }
-function updateCartBar(){ document.getElementById('cartCount').textContent = cartCount(); }
+function updateCart(){ document.getElementById('cartCount').textContent = cartCount(); }
 
 function openCart(){
-  const sheet = document.getElementById('sheet');
-  const entries = Object.entries(cart).filter(([_,q])=>q>0);
-  if(!entries.length){ toast('Сумка пуста, странник…'); return; }
-  sheet.innerHTML = `
-    <button class="close-x" onclick="closeCart()">✕</button>
-    <h2>Сумка странника</h2>
+  const entries = Object.entries(cart).filter(([,q])=>q>0);
+  if(!entries.length){ tg?.showAlert?.('Сумка пуста...') ?? alert('Сумка пуста...'); return; }
+  const total = entries.reduce((s,[id,q])=>{
+    const p = products.find(x=>x.id==id);
+    return s + (p ? p.price*q : 0);
+  },0);
+  document.getElementById('modal').innerHTML = `
+    <button class="close-x" onclick="closeCart()">X</button>
+    <h2>СУМКА СТРАННИКА</h2>
     ${entries.map(([id,q])=>{
-      const p = products.find(x=>x.id==id); if(!p) return '';
+      const p = products.find(x=>x.id==id);
       return `<div class="cart-item">
-        <span>${p.emoji} ${esc(p.name)}</span>
+        <span>${p.name}</span>
         <span class="qty-ctl">
-          <button onclick="chgQty(${id},-1)">−</button><b>${q}</b><button onclick="chgQty(${id},1)">+</button>
+          <button onclick="chgQty(${id},-1)">-</button>${q}<button onclick="chgQty(${id},1)">+</button>
         </span>
-        <span style="color:var(--gold)">${p.price*q} 🪙</span>
+        <span style="color:var(--pixel)">${p.price*q} ₽</span>
       </div>`;
     }).join('')}
-    <div class="total-row"><span>Итог:</span><span>${cartTotal()} золотых 🪙</span></div>
-    <textarea id="comment" rows="2" placeholder="Пожелания к заказу… (необязательно)"></textarea>
-    <button class="order-btn" id="orderBtn" onclick="submitOrder()">🖤 Оформить заказ</button>`;
+    <div class="total">ИТОГ: ${total} ₽</div>
+    <button class="modal-btn" onclick="checkout()">ОФОРМИТЬ ЗАКАЗ</button>`;
   document.getElementById('overlay').classList.add('open');
 }
 function closeCart(){ document.getElementById('overlay').classList.remove('open'); }
 function chgQty(id,d){
-  cart[id]=(cart[id]||0)+d;
+  cart[id] = (cart[id]||0)+d;
   if(cart[id]<=0) delete cart[id];
-  updateCartBar();
-  if(cartCount()===0){ closeCart(); } else { openCart(); }
+  updateCart();
+  if(!cartCount()) closeCart(); else openCart();
 }
 
-async function submitOrder(){
-  const btn = document.getElementById('orderBtn');
-  btn.disabled = true; btn.textContent = 'Хранитель читает свиток…';
+async function checkout(){
   const items = Object.entries(cart).map(([id,qty])=>({id:+id,qty}));
   try{
     const res = await fetch('/api/order',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ initData: tg?.initData || '', cart: items, comment: document.getElementById('comment').value })
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ initData: tg?.initData || '', cart: items })
     });
     const data = await res.json();
     if(data.ok){
-      tg?.HapticFeedback?.notificationOccurred('success');
-      cart = {}; updateCartBar();
-      document.getElementById('sheet').innerHTML = `
+      cart = {}; updateCart();
+      document.getElementById('modal').innerHTML = `
         <div class="success">
-          <div class="sigil">🕯️</div>
-          <h2>Заказ №${data.order_id} принят</h2>
-          <p>Свеча уже горит на прилавке.<br>Хранитель лавки напишет тебе в боте.</p>
+          <div class="success-icon">◆</div>
+          <h2>ЗАКАЗ №${data.order_id}<br>ПРИНЯТ</h2>
+          <p style="font-size:9px;margin-top:14px;color:var(--muted);line-height:2">Хранитель лавки<br>напишет тебе в боте</p>
         </div>`;
       setTimeout(closeCart, 3500);
-      loadProducts();
     } else {
-      toast('Не вышло: ' + (data.error||'ошибка')); btn.disabled=false; btn.textContent='🖤 Оформить заказ';
+      tg?.showAlert?.('Ошибка: '+(data.error||'')) ?? alert('Ошибка');
     }
   }catch(e){
-    toast('Связь с лавкой прервалась…'); btn.disabled=false; btn.textContent='🖤 Оформить заказ';
+    tg?.showAlert?.('Связь с лавкой прервалась') ?? alert('Связь с лавкой прервалась');
   }
 }
 
-function toast(msg){
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2200);
-}
-
-loadProducts();
+drawTower();
+drawDepth();
+renderCatalog();
+window.addEventListener('resize', ()=>{ drawTower(); drawDepth(); });
 </script>
 </body>
 </html>
