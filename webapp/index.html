@@ -2,176 +2,1105 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Лавка Странника - Идеальные Кнопки</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#16100d">
+<title>Лавка Странника — каталог</title>
+<script src="https://telegram.org/js/telegram-web-app.js" defer></script>
 <style>
 :root {
-  --bg: #1a1210;
+  color-scheme: dark;
+  --bg: #16100d;
+  --gold: #d6a76c;
+  --muted: #b8a38c;
+  --ink: #f2e5cc;
+  --ease: cubic-bezier(.22, .75, .25, 1);
 }
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+html, body { height: 100%; background: var(--bg); }
+body { color: var(--ink); font-family: Georgia, "Times New Roman", serif; overflow: hidden; }
+button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
+button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #f8ce87; outline-offset: 5px; }
 
-* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-
-body, html {
-  background-color: var(--bg);
-  height: 100%;
-  overflow: hidden; 
-}
-
-/* Статичный каменный фон */
+/* Only the content scrolls. This independent wall layer never moves. */
 .fixed-bg {
   position: fixed;
-  top: 0; 
-  left: 0; 
-  width: 100%; 
-  height: 100%;
-  /* Используем файл с новым именем, без знаков вопроса, чтобы сервер не выдавал ошибку */
-  background: url('stone_wall_bg_v2.jpg') center center / cover no-repeat;
+  inset: 0;
   z-index: 0;
+  pointer-events: none;
+  background: #16100d url("/static/stone_wall_bg.jpg") center / cover no-repeat;
+  image-rendering: pixelated;
 }
-
-/* Основной контейнер, который скроллится */
+.fixed-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(12, 8, 7, .14), transparent 42%, rgba(12, 8, 7, .2));
+}
 .scroll-container {
   position: relative;
-  width: 100%;
+  z-index: 1;
   height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
-  z-index: 1;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #6f4e32 transparent;
 }
-
-.wrap {
-  max-width: 520px;
-  margin: 0 auto;
-  position: relative;
-}
-
-/* ===== HERO SECTION ===== */
+.wrap { width: 100%; max-width: 560px; min-height: 100%; margin: 0 auto; }
 .hero {
   position: relative;
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  /* Используем файл с новым именем */
-  background: url('bg_v2.jpg') center center / contain no-repeat;
-  background-color: var(--bg);
-  z-index: 10;
-  box-shadow: 0 10px 20px rgba(0,0,0,0.8);
+  width: min(100%, 520px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  isolation: isolate;
 }
-
-/* ===== КНОПКИ ===== */
+/* The image fades into the wall instead of ending at a hard, square edge. */
+.hero-image {
+  display: block;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  image-rendering: pixelated;
+  -webkit-mask-image: linear-gradient(#000 0%, #000 81%, transparent 100%);
+  mask-image: linear-gradient(#000 0%, #000 81%, transparent 100%);
+}
 .pixel-btn {
   position: absolute;
-  width: 64px;
-  height: 64px;
-  
-  background-size: 100% 100%; 
-  background-position: center;
-  background-repeat: no-repeat;
-  
-  border: none;
-  background-color: transparent; 
-  cursor: pointer;
-  outline: none;
-  z-index: 30;
-  
-  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.7));
-  transition: transform 0.1s, filter 0.1s;
+  bottom: 11.5%;
+  width: clamp(56px, 14vw, 68px);
+  height: clamp(56px, 14vw, 68px);
+  border: 0;
+  background: transparent;
+  filter: drop-shadow(0 4px 4px #080504);
+  transition: transform .2s var(--ease), filter .2s;
 }
-
-.pixel-btn:active {
-  transform: translateY(4px);
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9));
+.pixel-btn img { display: block; width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; }
+.pixel-btn span {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 50%;
+  transform: translateX(-50%);
+  font: 11px/1.3 system-ui, sans-serif;
+  letter-spacing: .06em;
+  color: #e5d0b3;
+  text-shadow: 0 2px 3px #000, 0 0 6px #000;
 }
-
-.btn-chatgpt {
-  /* Используем файлы с новыми именами */
-  background-image: url('gpt_user_v2.png'); 
-  bottom: 11.5%; 
-  left: 20%;
+.pixel-btn:hover { transform: translateY(-3px); }
+.pixel-btn:active { transform: translateY(2px); }
+.pixel-btn[aria-pressed="true"] { filter: drop-shadow(0 0 9px #d69a48); }
+.pixel-btn[aria-pressed="true"] span { color: #ffdca5; }
+.pixel-btn[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  left: calc(50% - 2px);
+  bottom: -32px;
+  background: #efc387;
+  transform: rotate(45deg);
 }
-
-.btn-gemini {
-  /* Используем файлы с новыми именами */
-  background-image: url('gemini_user_v2.png'); 
-  bottom: 11.5%; 
-  right: 20%;
-}
-
-/* ===== КАРТОЧКИ ТОВАРОВ ===== */
+.btn-chatgpt { left: 20%; }
+.btn-gemini { right: 20%; }
 .shop-content {
-  padding: 20px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  padding-bottom: 40px;
+  position: relative;
+  margin-top: -9px;
+  padding: 0 0 max(24px, env(safe-area-inset-bottom));
+  min-height: 370px;
 }
-
-.card {
-  background: rgba(20, 15, 15, 0.75);
-  border: 2px solid #4a3424;
-  border-radius: 12px;
-  height: 180px;
+.empty-state { padding: 62px 24px 100px; text-align: center; }
+.eyebrow { color: var(--gold); font: 10px/1.5 system-ui, sans-serif; letter-spacing: .23em; text-transform: uppercase; }
+.empty-state h1 { margin: 14px 0 12px; font-size: 25px; font-weight: normal; }
+.empty-state p:last-child { color: #d0bea9; font: 13px/1.7 system-ui, sans-serif; }
+.catalog { opacity: 0; transform: translateY(14px); transition: opacity .28s, transform .4s var(--ease); }
+.catalog.is-visible { opacity: 1; transform: translateY(0); }
+.catalog.is-switching { opacity: 0; transform: translateY(8px); }
+.catalog-heading { display: flex; justify-content: center; align-items: center; gap: 13px; padding: 7px 20px 14px; }
+.catalog-heading::before, .catalog-heading::after { content: ""; width: 34px; height: 1px; background: #957044; }
+.catalog-heading h1 { font-size: 12px; font-weight: normal; letter-spacing: .16em; text-transform: uppercase; color: #e2be8e; text-shadow: 0 2px 4px #000; }
+.carousel-viewport {
+  --card-width: min(360px, calc(100% - 112px));
+  --gap: 16px;
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  overflow: hidden;
+  touch-action: pan-y pinch-zoom;
+}
+.carousel-track {
+  display: flex;
+  width: 100%;
+  gap: var(--gap);
+  padding: 10px 0 18px;
+  transition: transform .52s var(--ease);
+  will-change: transform;
+}
+.carousel-track.is-resetting { transition: none; }
+.product-card {
+  position: relative;
+  flex: 0 0 var(--card-width);
+  min-width: 0;
+  min-height: 266px;
+  padding: 22px 21px 17px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  color: #e0d0b8;
-  font-family: sans-serif;
-  font-weight: bold;
-  box-shadow: 0 6px 12px rgba(0,0,0,0.6);
-  backdrop-filter: blur(4px);
-  transition: transform 0.1s;
+  text-align: center;
+  border: 1px solid #6a4c30;
+  background: linear-gradient(145deg, #32251cf5, #1c1612fa 60%, #271b13fc);
+  box-shadow: inset 0 0 0 4px #18110d, inset 0 0 0 5px #503b28, 0 10px 16px #09060466;
+  color: #e5d5bf;
+  opacity: .48;
+  transform: scale(.94);
+  transition: transform .52s var(--ease), opacity .4s, border-color .4s;
 }
-
-.card:active {
-  transform: scale(0.96);
+.product-card.is-current { transform: scale(1); opacity: 1; border-color: #d0a064; }
+.product-card::before, .product-card::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: #af7e46;
+  box-shadow: inset 0 0 0 2px #5a3b24;
 }
-
-.card-icon {
-  width: 48px;
-  height: 48px;
-  background: #3a2618;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  border: 1px solid #6b4c3a;
+.product-card::before { left: 10px; top: 10px; }
+.product-card::after { right: 10px; bottom: 10px; }
+.card-kicker { font: 9px/1.4 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .18em; color: #c2a47e; }
+.card-icon { width: 62px; height: 62px; margin: 16px 0 14px; image-rendering: pixelated; filter: drop-shadow(0 4px 6px #0008); }
+.product-card h2 { font-size: clamp(22px, 5vw, 27px); font-weight: normal; line-height: 1.2; margin-bottom: 10px; }
+.card-description { max-width: 235px; color: #bfad96; font: 12px/1.65 system-ui, sans-serif; }
+.card-footer { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 17px; font: 9px/1.4 system-ui, sans-serif; letter-spacing: .12em; color: #cda775; }
+.card-footer span:first-child { text-align: left; }
+.edge-nav {
+  position: absolute;
+  top: 24px;
+  bottom: 32px;
+  width: calc((100% - var(--card-width)) / 2 - var(--gap));
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+}
+.edge-nav:hover { background: #e2b06a0a; }
+.edge-nav span { display: grid; place-items: center; width: 26px; height: 32px; border: 1px solid #967049; background: #1c130ddd; color: #f0c58f; font: 25px/1 Georgia, serif; box-shadow: 0 2px 8px #0006; }
+.edge-nav:focus-visible { outline-offset: -5px; }
+.edge-prev { left: 0; }
+.edge-next { right: 0; }
+.carousel-controls { display: flex; flex-direction: column; align-items: center; }
+.pagination { display: flex; justify-content: center; }
+.pagination button { display: grid; place-items: center; width: 32px; height: 44px; border: 0; background: transparent; }
+.pagination button::before { content: ""; width: 6px; height: 6px; border-radius: 50%; border: 1px solid #b29673; background: #261a12; transition: background .25s, transform .25s, box-shadow .25s; }
+.pagination button[aria-current="true"]::before { background: #e9be81; border-color: #ffdda6; transform: scale(1.35); box-shadow: 0 0 8px #d49a4866; }
+.pagination button:hover::before { background: #d9ad74; }
+.counter { font: 10px/1.5 system-ui, sans-serif; letter-spacing: .14em; color: #d8bea0; text-shadow: 0 2px 4px #000; }
+.carousel-hint { margin-top: 10px; text-align: center; color: #bba68d; font: 11px/1.6 system-ui, sans-serif; text-shadow: 0 1px 4px #000; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 600px) {
+  /* Preserve both torches and the side beams instead of cropping them off. */
+  .fixed-bg { background-position: center bottom; background-size: 100% auto; }
+  .shop-content { min-height: 370px; }
+}
+@media (min-width: 601px) {
+  .hero-image { -webkit-mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent), linear-gradient(#000 81%, transparent); mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent), linear-gradient(#000 81%, transparent); -webkit-mask-composite: source-in; mask-composite: intersect; }
+}
+:root {
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
+}
+body { height: var(--app-height, 100dvh); }
+.scroll-container {
+  padding-top: calc(var(--safe-top) + var(--tg-content-safe-area-inset-top, 0px));
+  scroll-padding: 24px 0 calc(110px + var(--safe-bottom) + var(--tg-content-safe-area-inset-bottom, 0px));
+  padding-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px));
+  padding-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px));
+}
+.wrap { padding-bottom: calc(96px + var(--safe-bottom) + var(--tg-content-safe-area-inset-bottom, 0px)); }
+a { color: #f0c58f; touch-action: manipulation; }
+button, a, input, select, textarea { outline-offset: 3px; }
+:focus-visible { outline: 2px solid #f8ce87; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+button, .action { min-height: 44px; }
+.hero { overflow: visible; }
+.hero-fallback { position: absolute; inset: 12% 9% 35%; display: grid; align-content: center; gap: 14px; text-align: center; background: #21170fe8; border: 1px solid #795733; padding: 16px; }
+.hero-fallback h1 { font-size: clamp(22px, 6vw, 34px); font-weight: normal; }
+.hero-fallback p { font: 14px/1.6 system-ui, sans-serif; color: var(--muted); }
+.pixel-btn { z-index: 1; }
+.pixel-btn span { white-space: nowrap; }
+.pixel-btn .stock-label { display: block; width: 124px; margin-top: 3px; font-size: 10px; letter-spacing: 0; white-space: normal; }
+.pixel-btn[data-stock="empty"] { filter: drop-shadow(0 0 7px #e45252); }
+.pixel-btn[data-stock="empty"] img { filter: sepia(1) saturate(3) hue-rotate(310deg); }
+.pixel-btn[data-stock="available"] { filter: drop-shadow(0 0 7px #5fd28a); }
+.pixel-btn[data-stock="available"] img { filter: sepia(1) saturate(2) hue-rotate(85deg); }
+.pixel-btn[data-stock="empty"] .stock-label, .out-of-stock { color: #ffaaa0; }
+.pixel-btn[data-stock="available"] .stock-label, .in-stock { color: #98e4ac; }
+.pixel-btn[aria-pressed="true"]::after { bottom: -58px; }
+.shop-content { margin-top: 20px; }
+.category-nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 14px 16px; }
+.category-nav button { min-width: 44px; max-width: 100%; overflow-wrap: anywhere; padding: 9px 12px; border: 1px solid #765436; background: #21170fea; font: 12px/1.5 system-ui, sans-serif; }
+.category-nav button[aria-pressed="true"] { border-color: #edc48b; background: #46301e; }
+.category-nav small { display: block; }
+.notice { margin: 12px 16px; padding: 12px 14px; border: 1px solid #775334; background: #21170ff0; font: 13px/1.65 system-ui, sans-serif; overflow-wrap: anywhere; }
+.notice:empty { display: none; }
+.notice.error, .notice .error, .feedback.error { color: #ffc1b8; border-color: #a75249; }
+.notice button { margin-top: 8px; }
+.action { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 14px; border: 1px solid #b38550; background: #3a281b; color: #ffe1b6; text-decoration: none; font: 14px/1.4 system-ui, sans-serif; }
+.action.primary { background: #77532c; border-color: #dbb179; color: #fff1db; }
+.product-card { overflow-wrap: anywhere; }
+.card-description { white-space: pre-wrap; }
+.card-footer { flex-wrap: wrap; font-size: 11px; letter-spacing: 0; }
+.card-price { font: 20px/1.4 Georgia, serif; color: #ffe1b6; margin: 12px 0; }
+.product-card .action { width: 100%; margin-top: 12px; }
+.edge-nav { width: max(44px, calc((100% - var(--card-width)) / 2 - var(--gap))); }
+.pagination { flex-wrap: wrap; max-width: 100%; padding: 0 12px; }
+.pagination button { width: 44px; }
+.main-nav { position: fixed; z-index: 5; left: 0; right: 0; bottom: 0; border-top: 1px solid #735334; background: #17100df5; padding: 8px max(8px, env(safe-area-inset-left), var(--tg-safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px)) calc(8px + var(--safe-bottom) + var(--tg-content-safe-area-inset-bottom, 0px)); }
+.main-nav { padding-right: max(8px, env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px)); }
+.main-nav-inner { display: flex; justify-content: center; gap: 3px; max-width: 560px; margin: auto; }
+.main-nav button { flex: 1; min-width: 0; padding: 10px 3px; border: 1px solid transparent; background: transparent; color: #c5ad91; font: 12px/1.3 system-ui, sans-serif; }
+.main-nav button[aria-current="page"] { color: #ffe0b0; border-color: #89633d; background: #352418; }
+.page-panel { margin: 20px 16px; padding: 22px 18px; border: 1px solid #785634; background: linear-gradient(145deg, #32251cf5, #1c1612fa 60%, #271b13fc); box-shadow: inset 0 0 0 4px #18110d, inset 0 0 0 5px #503b28; overflow-wrap: anywhere; }
+.page-panel h1 { font-size: 28px; font-weight: normal; margin: 6px 0 20px; }
+.page-panel h2 { font-size: 21px; font-weight: normal; margin: 22px 0 12px; }
+.page-panel p { font: 14px/1.7 system-ui, sans-serif; margin: 12px 0; }
+.page-art { display: block; width: 100%; max-height: 340px; object-fit: contain; image-rendering: pixelated; margin-bottom: 18px; }
+.art-fallback { padding: 30px 18px; color: var(--muted); text-align: center; border: 1px solid #68492d; }
+.stats { display: grid; gap: 0; font: 14px/1.6 system-ui, sans-serif; }
+.stats div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 12px 0; border-bottom: 1px solid #503b28; }
+.stats dt { color: var(--muted); }
+.stats dd { text-align: right; overflow-wrap: anywhere; }
+.wallet-balance { font: 36px/1.5 Georgia, serif !important; color: #f1c58c; }
+.editor { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 14px; margin: 18px 0; padding: 16px 12px; border: 1px solid #61452c; }
+.editor legend { padding: 0 6px; color: #ebc392; }
+.editor label { display: grid; gap: 6px; font: 13px/1.5 system-ui, sans-serif; }
+input, textarea, select { width: 100%; min-width: 0; min-height: 44px; padding: 10px; border: 1px solid #96714b; border-radius: 0; background: #17110d; color: var(--ink); font: 16px/1.5 system-ui, sans-serif; }
+textarea { resize: vertical; min-height: 90px; }
+.editor label.check { display: flex; align-items: center; min-height: 44px; gap: 10px; }
+input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 22px; accent-color: #cca16d; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.feedback { font: 13px/1.6 system-ui, sans-serif; overflow-wrap: anywhere; }
+.feedback:empty { display: none; }
+.admin-row, .order-row { border-bottom: 1px solid #61452c; padding: 14px 0; }
+.admin-row p, .order-row p { margin: 4px 0 10px; }
+.admin-row h3, .order-row h3 { font-size: 17px; font-weight: normal; }
+.order-row ul { padding-left: 20px; font: 13px/1.6 system-ui, sans-serif; }
+#order-dialog { margin: auto; width: min(460px, calc(100% - 28px)); max-height: calc(var(--app-height, 100dvh) - var(--safe-top) - var(--safe-bottom) - var(--tg-content-safe-area-inset-top, 0px) - var(--tg-content-safe-area-inset-bottom, 0px) - 28px); padding: 24px 18px; overflow-y: auto; color: var(--ink); background: #241a13; border: 1px solid #b48956; box-shadow: 0 12px 80px #000b; }
+#order-dialog::backdrop { background: #080503cf; }
+#order-dialog h2 { font-size: 24px; font-weight: normal; }
+#order-dialog p { margin: 16px 0; font: 14px/1.65 system-ui, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 360px) {
+  .product-card { padding: 22px 14px 17px; }
+  .main-nav button { font-size: 11px; }
+  .page-panel { margin: 16px 10px; padding: 20px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 </style>
 </head>
 <body>
-
-<div class="fixed-bg"></div>
-
-<div class="scroll-container">
+<div class="fixed-bg" aria-hidden="true"></div>
+<main class="scroll-container" id="shop-scroll">
   <div class="wrap">
-    <section class="hero">
-      <!-- Кнопка ChatGPT -->
-      <button class="pixel-btn btn-chatgpt" onclick="playClick()"></button>
-
-      <!-- Кнопка Gemini -->
-      <button class="pixel-btn btn-gemini" onclick="playClick()"></button>
+    <div class="notice" id="session-notice" role="status">Проверяем вход через Telegram…</div>
+    <div class="notice" id="config-notice" hidden><p id="config-message" role="status"></p><button class="action" id="retry-config" type="button">Повторить загрузку настроек</button></div>
+    <div class="notice" id="global-message" role="status" aria-live="polite"></div>
+    <div id="view-catalog" data-page="catalog">
+      <section class="hero" aria-label="Лавка Странника — выберите сервис">
+        <div class="hero-fallback" id="hero-fallback"><h1>Лавка Странника</h1><p>Цифровые припасы для твоего пути.<br>Выбери сервис у прилавка.</p></div>
+        <img class="hero-image" id="hero-image" src="/static/bg.jpg" alt="Лавка Странника — пиксельный торговец у прилавка" width="1080" height="1080" fetchpriority="high">
+        <button class="pixel-btn btn-chatgpt" type="button" data-provider="chatgpt" data-stock="empty" aria-label="Показать товары ChatGPT" aria-pressed="false" aria-controls="catalog">
+          <img src="/static/gpt_user_v2.png" alt="" width="68" height="68"><span>ChatGPT<small class="stock-label">Нет в наличии</small></span>
+        </button>
+        <button class="pixel-btn btn-gemini" type="button" data-provider="gemini" data-stock="empty" aria-label="Показать товары Gemini" aria-pressed="false" aria-controls="catalog">
+          <img src="/static/gemini_user_v2.png" alt="" width="68" height="68"><span>Gemini<small class="stock-label">Нет в наличии</small></span>
+        </button>
+      </section>
+      <section class="shop-content" aria-label="Каталог товаров">
+        <nav class="category-nav" id="category-nav" aria-label="Категории товаров"></nav>
+        <div class="notice" id="catalog-notice"><p id="catalog-message" role="status">Загружаем каталог…</p><button type="button" class="action" id="retry-catalog" hidden>Повторить загрузку</button></div>
+        <div class="empty-state" id="empty-state">
+          <p class="eyebrow">За прилавком — больше</p>
+          <h1 id="empty-title">Что ищешь, странник?</h1>
+          <p id="empty-description">Нажми на ChatGPT, Gemini или другую категорию, чтобы открыть товары.</p>
+        </div>
+        <div class="catalog" id="catalog" hidden>
+          <header class="catalog-heading"><h1 id="catalog-title">Товары</h1></header>
+          <div class="carousel-viewport" id="carousel" role="region" aria-roledescription="карусель" aria-labelledby="catalog-title" tabindex="0">
+            <div class="carousel-track is-resetting" id="carousel-track"></div>
+            <button type="button" class="edge-nav edge-prev" id="previous-card" aria-label="Предыдущий товар" hidden><span aria-hidden="true">‹</span></button>
+            <button type="button" class="edge-nav edge-next" id="next-card" aria-label="Следующий товар" hidden><span aria-hidden="true">›</span></button>
+          </div>
+          <div class="carousel-controls">
+            <nav class="pagination" id="pagination" aria-label="Выбор товара"></nav>
+            <p class="counter" id="counter"></p>
+          </div>
+          <p class="carousel-hint">Листай, нажимай на стрелки или на точки</p>
+        </div>
+        <p class="sr-only" id="announcement" role="status" aria-live="polite" aria-atomic="true"></p>
+      </section>
+    </div>
+    <section class="page-panel" id="view-profile" data-page="profile" aria-labelledby="profile-title" hidden>
+      <p class="eyebrow">Летопись пути</p><h1 id="profile-title" tabindex="-1">Профиль странника</h1>
+      <img class="page-art" id="profile-image" src="/api/art/profile" alt="Профиль странника" width="1080" height="1080">
+      <p class="art-fallback" id="profile-fallback" hidden>Летопись странника — твоя история в лавке.</p>
+      <p id="profile-login">Открой лавку через Telegram, чтобы увидеть свой профиль. В браузере доступен только просмотр каталога.</p>
+      <dl class="stats" id="profile-stats" hidden></dl>
+      <button class="action" type="button" id="refresh-profile" hidden>Обновить профиль</button>
     </section>
-
-    <!-- Секция товаров -->
-    <section class="shop-content">
-      <div class="card"><div class="card-icon"></div>Товар 1</div>
-      <div class="card"><div class="card-icon"></div>Товар 2</div>
-      <div class="card"><div class="card-icon"></div>Товар 3</div>
-      <div class="card"><div class="card-icon"></div>Товар 4</div>
-      <div class="card"><div class="card-icon"></div>Товар 5</div>
-      <div class="card"><div class="card-icon"></div>Товар 6</div>
+    <section class="page-panel" id="view-wallet" data-page="wallet" aria-labelledby="wallet-title" hidden>
+      <p class="eyebrow">Кошель странника</p><h1 id="wallet-title" tabindex="-1">Кошелёк</h1>
+      <p>Баланс</p><p class="wallet-balance" id="wallet-balance">—</p>
+      <p id="wallet-login">Баланс доступен после входа через Telegram.</p>
+      <p id="payment-note">Платёжный сервис не подключён. Пополнение и онлайн-оплата недоступны. Оформление и исполнение заказов — вручную через поддержку.</p>
+      <a class="action support-link" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer">@DitzzmBack</a>
     </section>
+    <section class="page-panel" id="view-support" data-page="support" aria-labelledby="support-title" hidden>
+      <p class="eyebrow">Огонь у дороги</p><h1 id="support-title" tabindex="-1">Поддержка</h1>
+      <img class="page-art" id="support-image" src="/api/art/support" alt="У прилавка Лавки Странника" width="1080" height="1080">
+      <p class="art-fallback" id="support-fallback" hidden>Мы рядом, странник.</p>
+      <p>Если сбился с пути или нужна помощь — обратись к нам.</p>
+      <a class="action primary support-link" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer">@DitzzmBack</a>
+    </section>
+    <section class="page-panel" id="view-admin" data-page="admin" aria-labelledby="admin-title" hidden>
+      <p class="eyebrow">За прилавком</p><h1 id="admin-title" tabindex="-1">Управление лавкой</h1>
+      <p>Настоящие товары и остатки. Сними отметку «Показывать», чтобы скрыть запись без удаления.</p>
+      <button class="action" id="refresh-admin" type="button">Обновить данные</button>
+      <p class="feedback" id="admin-feedback" role="status" aria-live="polite"></p>
+      <h2>Категории</h2>
+      <div id="admin-categories"></div>
+      <form id="category-form">
+        <fieldset class="editor" id="category-fields" disabled>
+          <legend id="category-form-title">Новая категория</legend>
+          <label>Название<input name="name" required maxlength="120" autocomplete="off"></label>
+          <label>Код категории (slug)<input name="slug" required pattern="[a-z0-9]+(?:(?:-|_)[a-z0-9]+)*" maxlength="80" placeholder="chatgpt" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+          <label class="check"><input name="active" type="checkbox" checked>Показывать категорию</label>
+          <div class="form-actions"><button class="action primary" type="submit">Сохранить категорию</button><button class="action" type="button" id="reset-category">Новая категория</button></div>
+        </fieldset>
+        <p class="feedback" id="category-feedback" role="status" aria-live="polite"></p>
+      </form>
+      <h2>Товары и варианты</h2>
+      <p>Каждый вариант — отдельный товар. Например, ChatGPT 1M и ChatGPT 24h. Новые товары создаются с нулевым остатком; цена 0 означает «не задана».</p>
+      <div id="admin-products"></div>
+      <form id="product-form">
+        <fieldset class="editor" id="product-fields" disabled>
+          <legend id="product-form-title">Новый товар</legend>
+          <label>Название варианта<input name="name" required maxlength="200" placeholder="ChatGPT 1M / ChatGPT 24h" autocomplete="off"></label>
+          <label>Описание<textarea name="description" maxlength="4000"></textarea></label>
+          <label>Цена, целые рубли<input name="price" type="number" inputmode="numeric" min="0" max="9007199254740991" step="1" value="0" required></label>
+          <label>Категория<select name="category" required></select></label>
+          <label>Остаток<input name="stock" type="number" inputmode="numeric" min="0" max="9007199254740991" step="1" value="0" required></label>
+          <label class="check"><input name="active" type="checkbox" checked>Показывать товар</label>
+          <label class="check"><input name="allow_preorder" type="checkbox">Разрешить предзаказ при отсутствии</label>
+          <div class="form-actions"><button class="action primary" type="submit">Сохранить товар</button><button class="action" type="button" id="reset-product">Новый товар</button></div>
+        </fieldset>
+        <p class="feedback" id="product-feedback" role="status" aria-live="polite"></p>
+      </form>
+      <h2>Заказы</h2>
+      <p>«Оплачен» — только после проверки реальной оплаты. Доступные переходы зависят от текущего статуса.</p>
+      <p class="feedback" id="orders-feedback" role="status" aria-live="polite"></p>
+      <div id="admin-orders"></div>
+    </section>
+    <noscript><p class="notice">Для загрузки товаров и работы с Telegram включи JavaScript.</p></noscript>
   </div>
-</div>
-
+</main>
+<nav class="main-nav" aria-label="Основная навигация">
+  <div class="main-nav-inner">
+    <button type="button" data-view="catalog" aria-current="page" aria-controls="view-catalog">Каталог</button>
+    <button type="button" data-view="profile" aria-controls="view-profile">Профиль</button>
+    <button type="button" data-view="wallet" aria-controls="view-wallet">Кошелёк</button>
+    <button type="button" data-view="support" aria-controls="view-support">Поддержка</button>
+    <button type="button" id="admin-nav" data-view="admin" aria-controls="view-admin" hidden>Админ</button>
+  </div>
+</nav>
+<dialog id="order-dialog" aria-labelledby="order-title" aria-describedby="order-summary order-explanation">
+  <h2 id="order-title">Подтверждение заказа</h2>
+  <p id="order-summary"></p>
+  <p id="order-explanation">Деньги сейчас не списываются. Оплата и выдача — вручную через поддержку. Подтверди отправку заявки.</p>
+  <p id="order-feedback" class="feedback" role="status" aria-live="polite"></p>
+  <div class="form-actions"><button class="action primary" id="confirm-order" type="button">Подтвердить заявку</button><button class="action" id="cancel-order" type="button">Отмена</button></div>
+  <a class="action support-link" id="order-support" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer" hidden>@DitzzmBack</a>
+</dialog>
 <script>
-  const tg = window.Telegram?.WebApp;
-  if (tg) { tg.ready(); tg.expand(); }
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const providers = new Map([
+    ["chatgpt", { name: "ChatGPT", icon: "/static/gpt_user_v2.png" }],
+    ["gemini", { name: "Gemini", icon: "/static/gemini_user_v2.png" }]
+  ]);
+  const catalog = $("catalog"), viewport = $("carousel"), track = $("carousel-track");
+  const pagination = $("pagination"), previous = $("previous-card"), next = $("next-card");
+  const scroller = $("shop-scroll"), dialog = $("order-dialog");
+  const categoryForm = $("category-form"), productForm = $("product-form");
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const money = value => new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(value);
+  const integer = value => Number.isSafeInteger(value) && value >= 0;
+  const enabled = value => value === true || value === 1;
+  const initData = () => window.Telegram?.WebApp?.initData || "";
+  const isAdmin = () => Boolean(initData() && me?.is_admin === true);
+  let categories = [], products = [], selectedProvider = null, activeIndex = 0;
+  let catalogReady = false, catalogLoaded = false, catalogRequest = null;
+  let config = null, configRequest = null, me = null, meRequest = null;
+  let sessionError = "", currentView = "catalog", initialViewApplied = false;
+  let pointerStart = null, suppressClickUntil = 0, app = null;
+  let adminCategories = [], adminProducts = [], adminReady = false, adminRequest = null, adminBusy = false;
+  let editingCategory = null, editingProduct = null;
+  let orderIntent = null, orderBusy = false;
+  const orderKeys = new Map();
 
-  function playClick() {
-    if (tg && tg.HapticFeedback) {
-      tg.HapticFeedback.impactOccurred('medium');
+  function node(tag, className = "", text) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined) element.textContent = String(text ?? "");
+    return element;
+  }
+  function button(text, action) {
+    const element = node("button", "action", text);
+    element.type = "button";
+    element.addEventListener("click", action);
+    return element;
+  }
+  function feedback(id, text = "", error = false) {
+    $(id).textContent = text;
+    $(id).classList.toggle("error", error);
+  }
+  function message(error) { return error instanceof Error ? error.message : "Не удалось выполнить запрос. Повтори попытку."; }
+
+  async function api(path, { method = "GET", body, auth = false } = {}) {
+    const headers = { Accept: "application/json" };
+    if (auth) {
+      const data = initData();
+      if (!data) throw new Error("Для этого действия открой лавку через Telegram.");
+      headers.Authorization = "tma " + data;
+    }
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store", credentials: "same-origin", signal: controller.signal });
+      const raw = await response.text();
+      let data = null;
+      try { data = raw ? JSON.parse(raw) : null; } catch { /* HTML error pages are not API data. */ }
+      if (!response.ok) {
+        if (auth && (response.status === 401 || response.status === 403)) {
+          me = null;
+          sessionError = "Вход не подтверждён или доступ запрещён. Открой лавку заново через Telegram.";
+          renderSession();
+          if (currentView === "admin") setView("catalog", false);
+        }
+        const detail = typeof data?.detail === "string" ? data.detail : typeof data?.error === "string" ? data.error : typeof data?.message === "string" ? data.message : "";
+        const error = new Error(detail || (response.status === 401 || response.status === 403 ? "Нет доступа. Обнови вход через Telegram." : `Сервер вернул ошибку ${response.status}. Повтори попытку.`));
+        error.status = response.status;
+        throw error;
+      }
+      if (method === "GET" && (!data || typeof data !== "object")) throw new Error("Сервер вернул неверный ответ. Повтори загрузку.");
+      return data;
+    } catch (error) {
+      if (error.name === "AbortError") throw new Error("Сервер не ответил вовремя. Повтори попытку.");
+      if (error instanceof TypeError) throw new Error("Нет связи с лавкой. Проверь интернет и повтори попытку.");
+      throw error;
+    } finally { clearTimeout(timeout); }
+  }
+
+  function setArt(id, source, fallback, captionId) {
+    const image = $(id), caption = $(captionId);
+    const safeSource = typeof source === "string" && /^\/(?:api\/art\/|static\/)[^\\\s]*$/.test(source) ? source : fallback;
+    image.onload = () => { image.hidden = false; caption.hidden = true; };
+    image.onerror = () => {
+      if (image.getAttribute("src") !== fallback) {
+        image.src = fallback;
+        if (id === "profile-image") image.alt = "Лавка Странника — исходная иллюстрация торговца";
+      } else { image.hidden = true; caption.hidden = false; }
+    };
+    image.hidden = false;
+    if (image.getAttribute("src") !== safeSource) image.src = safeSource;
+    else if (image.complete) { if (image.naturalWidth) image.onload(); else image.onerror(); }
+  }
+
+  function loadConfig() {
+    if (configRequest) return configRequest;
+    $("retry-config").disabled = true;
+    configRequest = (async () => {
+      try {
+        const data = await api("/api/config");
+        if (typeof data.payment_enabled !== "boolean" || data.currency !== "RUB") throw new Error("Не удалось проверить настройки лавки. Повтори загрузку.");
+        config = data;
+        $("config-notice").hidden = true;
+        $("payment-note").textContent = data.payment_enabled
+          ? "Онлайн-оплата в этой лавке не используется. Оплату и выдачу согласуй вручную с поддержкой."
+          : "Платёжный сервис не подключён. Пополнение и онлайн-оплата недоступны. Оформление и исполнение заказов — вручную через поддержку.";
+        const username = typeof data.support_username === "string" && /^[A-Za-z0-9_]{5,32}$/.test(data.support_username) ? data.support_username : "DitzzmBack";
+        document.querySelectorAll(".support-link").forEach(link => { link.href = "https://t.me/" + username; link.textContent = "@" + username; });
+        setArt("hero-image", data.images?.menu, "/static/bg.jpg", "hero-fallback");
+        setArt("profile-image", data.images?.profile || "/api/art/profile", "/static/bg.jpg", "profile-fallback");
+        setArt("support-image", data.images?.support || "/api/art/support", "/static/bg.jpg", "support-fallback");
+      } catch (error) {
+        $("config-notice").hidden = false;
+        feedback("config-message", message(error), true);
+      } finally { configRequest = null; $("retry-config").disabled = false; }
+    })();
+    return configRequest;
+  }
+
+  function availableProducts() { return products.filter(product => product.category === selectedProvider); }
+  function categoryName(slug) { return categories.find(category => category.slug === slug)?.name || providers.get(slug)?.name || slug || "Товары"; }
+  function stockText(stock) { return stock > 0 ? `В наличии: ${stock}` : "Нет в наличии"; }
+  function categoryStock(slug) {
+    const category = categories.find(item => item.slug === slug);
+    return integer(category?.stock) ? category.stock : products.filter(item => item.category === slug).reduce((sum, item) => sum + item.stock, 0);
+  }
+  function renderCategories() {
+    document.querySelectorAll(".pixel-btn").forEach(control => {
+      const slug = control.dataset.provider, stock = categoryStock(slug);
+      const text = catalogReady ? stockText(stock) : catalogLoaded ? "Остаток не подтверждён" : "Проверяем остаток";
+      control.dataset.stock = stock > 0 && catalogReady ? "available" : "empty";
+      control.setAttribute("aria-pressed", String(slug === selectedProvider));
+      control.setAttribute("aria-label", `${providers.get(slug).name}. ${text}. Показать товары`);
+      control.querySelector(".stock-label").textContent = text;
+    });
+    const nav = $("category-nav");
+    const focusedSlug = nav.contains(document.activeElement) ? document.activeElement.dataset.provider : null;
+    nav.replaceChildren();
+    categories.filter(category => !providers.has(category.slug)).forEach(category => {
+      const stock = categoryStock(category.slug);
+      const control = button("", () => selectProvider(category.slug));
+      control.dataset.provider = category.slug;
+      control.setAttribute("aria-pressed", String(category.slug === selectedProvider));
+      control.setAttribute("aria-controls", "catalog");
+      control.append(node("span", "", category.name), node("small", stock > 0 && catalogReady ? "in-stock" : "out-of-stock", catalogReady ? stockText(stock) : "Остаток не подтверждён"));
+      nav.append(control);
+      if (focusedSlug === category.slug) control.focus({ preventScroll: true });
+    });
+  }
+
+  function orderKind(product) {
+    if (!product || !product.active || !integer(product.price) || product.price <= 0) return null;
+    if (product.stock > 0) return "order";
+    return product.allow_preorder ? "preorder" : null;
+  }
+  function positionTrack() {
+    const card = track.firstElementChild;
+    if (!card) return;
+    const gap = parseFloat(getComputedStyle(track).gap) || 16;
+    const x = (viewport.clientWidth - card.offsetWidth) / 2 - activeIndex * (card.offsetWidth + gap);
+    track.style.transform = `translate3d(${x}px, 0, 0)`;
+  }
+  function updateState(announce = true) {
+    const items = availableProducts();
+    Array.from(track.children).forEach((card, index) => {
+      const current = index === activeIndex;
+      if (!current && card.contains(document.activeElement)) viewport.focus({ preventScroll: true });
+      card.classList.toggle("is-current", current);
+      card.setAttribute("aria-hidden", String(!current));
+      card.toggleAttribute("inert", !current);
+      card.querySelectorAll("button").forEach(control => {
+        control.disabled = !current || !catalogReady || !me || !initData() || !orderKind(items[index]);
+        control.tabIndex = current ? 0 : -1;
+      });
+    });
+    Array.from(pagination.children).forEach((dot, index) => {
+      if (index === activeIndex) dot.setAttribute("aria-current", "true");
+      else dot.removeAttribute("aria-current");
+    });
+    previous.hidden = activeIndex <= 0;
+    next.hidden = activeIndex >= items.length - 1;
+    $("counter").textContent = items.length ? `${String(activeIndex + 1).padStart(2, "0")} / ${String(items.length).padStart(2, "0")}` : "";
+    positionTrack();
+    if (announce && items[activeIndex]) $("announcement").textContent = `${categoryName(selectedProvider)}: ${items[activeIndex].name}, ${activeIndex + 1} из ${items.length}. ${stockText(items[activeIndex].stock)}`;
+  }
+  function goTo(index) {
+    const items = availableProducts();
+    if (!items.length) return;
+    const bounded = Math.max(0, Math.min(index, items.length - 1));
+    if (bounded === activeIndex) return;
+    activeIndex = bounded;
+    try { if (app?.isVersionAtLeast?.("6.1")) app.HapticFeedback?.impactOccurred("light"); } catch { /* Optional Telegram feedback. */ }
+    const focused = document.activeElement;
+    updateState();
+    if ((focused === previous && previous.hidden) || (focused === next && next.hidden)) viewport.focus({ preventScroll: true });
+  }
+  function renderCatalog() {
+    const items = availableProducts(), focused = catalog.contains(document.activeElement);
+    activeIndex = Math.max(0, Math.min(activeIndex, items.length - 1));
+    track.classList.add("is-resetting");
+    track.replaceChildren();
+    pagination.replaceChildren();
+    const hasCards = Boolean(selectedProvider && items.length);
+    catalog.hidden = !hasCards;
+    $("empty-state").hidden = hasCards;
+    $("empty-title").textContent = selectedProvider ? `Товары ${categoryName(selectedProvider)}` : "Что ищешь, странник?";
+    $("empty-description").textContent = !catalogReady && !catalogLoaded
+      ? "Загрузи каталог, чтобы увидеть реальные товары и остатки."
+      : selectedProvider ? "В этой категории пока нет доступных товаров. Загляни позже или обратись в поддержку."
+      : products.length ? "Нажми на ChatGPT, Gemini или другую категорию, чтобы открыть товары." : "В лавке пока нет товаров. Новые варианты появятся здесь после добавления продавцом.";
+    $("catalog-title").textContent = `Товары ${categoryName(selectedProvider)}`;
+    items.forEach((product, index) => {
+      const card = node("article", "product-card");
+      card.id = `product-card-${index}`;
+      card.setAttribute("role", "group");
+      card.setAttribute("aria-roledescription", "карточка товара");
+      card.setAttribute("aria-label", `${product.name}, ${index + 1} из ${items.length}`);
+      card.append(node("p", "card-kicker", `Лавка Странника / ${categoryName(selectedProvider)}`));
+      const provider = providers.get(selectedProvider);
+      if (provider) {
+        const image = node("img", "card-icon");
+        image.src = provider.icon; image.alt = ""; image.width = 62; image.height = 62; image.draggable = false;
+        image.addEventListener("error", () => { image.hidden = true; }, { once: true });
+        card.append(image);
+      }
+      card.append(node("h2", "", product.name), node("p", "card-description", product.description));
+      card.append(node("p", "card-price", product.price > 0 ? money(product.price) : "Цена не задана"));
+      const footer = node("div", "card-footer");
+      footer.append(node("span", product.stock > 0 ? "in-stock" : "out-of-stock", stockText(product.stock)));
+      if (product.stock === 0 && product.allow_preorder) footer.append(node("span", "", "Доступен предзаказ"));
+      card.append(footer);
+      const kind = orderKind(product);
+      const label = product.price <= 0 ? "Цена не задана" : !kind ? "Нет в наличии" : !initData() ? "Войди через Telegram" : !me ? "Подтверди вход" : !catalogReady ? "Обнови каталог" : kind === "preorder" ? "Предзаказать" : "Оформить заказ";
+      const control = button(label, () => { if (performance.now() >= suppressClickUntil) openOrder(product.id); });
+      control.classList.add("primary");
+      card.append(control);
+      track.append(card);
+      const dot = button("", () => goTo(index));
+      dot.className = "";
+      dot.setAttribute("aria-label", `${product.name}, ${index + 1} из ${items.length}`);
+      dot.setAttribute("aria-controls", card.id);
+      pagination.append(dot);
+    });
+    updateState(false);
+    void track.offsetWidth;
+    track.classList.remove("is-resetting");
+    catalog.classList.add("is-visible");
+    if (focused && hasCards) viewport.focus({ preventScroll: true });
+  }
+  function revealCatalog() {
+    const target = catalog.hidden ? $("empty-state") : catalog;
+    const bounds = target.getBoundingClientRect(), container = scroller.getBoundingClientRect();
+    const bottom = Math.min(container.bottom, document.querySelector(".main-nav").getBoundingClientRect().top) - 18;
+    if (bounds.bottom > bottom) {
+      const available = bottom - container.top - 18;
+      const delta = bounds.height <= available ? bounds.bottom - bottom : bounds.top - container.top - 18;
+      scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: reducedMotion.matches ? "instant" : "smooth" });
     }
   }
+  function selectProvider(slug) {
+    if (selectedProvider !== slug) { selectedProvider = slug; activeIndex = 0; renderCategories(); renderCatalog(); updateState(); }
+    requestAnimationFrame(revealCatalog);
+  }
+  function loadCatalog() {
+    if (catalogRequest) return catalogRequest;
+    $("retry-catalog").disabled = true;
+    $("catalog-notice").hidden = false;
+    feedback("catalog-message", "Обновляем товары и остатки…");
+    catalog.setAttribute("aria-busy", "true");
+    catalogRequest = (async () => {
+      try {
+        const data = await api("/api/catalog");
+        if (!Array.isArray(data.categories) || !Array.isArray(data.products)) throw new Error("Неверный формат каталога. Повтори загрузку.");
+        const oldId = availableProducts()[activeIndex]?.id;
+        categories = data.categories.filter(category => category && typeof category.slug === "string" && category.active !== false && category.active !== 0);
+        const slugs = new Set(categories.map(category => category.slug));
+        products = data.products.filter(product => product && product.id != null && enabled(product.active) && slugs.has(product.category)).map(product => ({ ...product, active: true, stock: integer(product.stock) ? product.stock : 0, price: integer(product.price) ? product.price : 0, allow_preorder: enabled(product.allow_preorder) }));
+        catalogReady = true; catalogLoaded = true;
+        if (selectedProvider && !slugs.has(selectedProvider) && !providers.has(selectedProvider)) selectedProvider = null;
+        const index = availableProducts().findIndex(product => product.id === oldId);
+        activeIndex = Math.max(0, index);
+        $("catalog-notice").hidden = true;
+        $("retry-catalog").hidden = true;
+      } catch (error) {
+        catalogReady = false;
+        $("catalog-notice").hidden = false;
+        feedback("catalog-message", message(error) + (catalogLoaded ? " Показаны последние загруженные данные; оформление недоступно до обновления." : " Товары не загружены."), true);
+        $("retry-catalog").hidden = false;
+      } finally {
+        catalogRequest = null;
+        $("retry-catalog").disabled = false;
+        catalog.removeAttribute("aria-busy");
+        renderCategories(); renderCatalog();
+      }
+    })();
+    return catalogRequest;
+  }
+
+  function renderSession() {
+    const authenticated = Boolean(me && initData());
+    $("session-notice").hidden = authenticated;
+    $("session-notice").replaceChildren();
+    if (!authenticated) {
+      $("session-notice").append(node("p", "", initData() ? sessionError || "Проверяем вход через Telegram…" : "Ты вне Telegram: доступен только просмотр. Для профиля, кошелька и заказов открой лавку в Telegram."));
+      if (initData() && sessionError) $("session-notice").append(button("Повторить вход", loadMe));
+    }
+    $("admin-nav").hidden = !isAdmin();
+    $("profile-login").hidden = authenticated;
+    $("profile-login").textContent = initData() ? sessionError || "Проверяем профиль…" : "Открой лавку через Telegram, чтобы увидеть свой профиль. В браузере доступен только просмотр каталога.";
+    $("profile-stats").hidden = !authenticated;
+    $("refresh-profile").hidden = !initData();
+    $("wallet-login").hidden = authenticated;
+    $("wallet-login").textContent = initData() ? sessionError || "Проверяем баланс…" : "Баланс доступен после входа через Telegram.";
+    $("wallet-balance").textContent = authenticated && integer(me.balance) ? money(me.balance) : "—";
+    $("profile-stats").replaceChildren();
+    if (authenticated) {
+      const favorite = typeof me.favorite_product === "object" && me.favorite_product ? me.favorite_product.name : me.favorite_product;
+      const stats = [["Номер странника", me.traveler_no ?? "—"], ["Покупки", me.purchases ?? "—"], ["Предзаказы", me.preorders ?? "—"], ["Потрачено", integer(me.spent) ? money(me.spent) : "—"], ["Любимый товар", favorite || "Пока нет"], ["Баланс", integer(me.balance) ? money(me.balance) : "—"]];
+      stats.forEach(([label, value]) => { const row = node("div"); row.append(node("dt", "", label), node("dd", "", value)); $("profile-stats").append(row); });
+    }
+    if (!isAdmin()) {
+      adminReady = false;
+      adminCategories = []; adminProducts = [];
+      $("admin-categories").replaceChildren(); $("admin-products").replaceChildren(); $("admin-orders").replaceChildren();
+      if (currentView === "admin") setView("catalog", false);
+    }
+    syncAdminControls();
+    renderCatalog();
+  }
+  function loadMe() {
+    if (!initData()) { me = null; renderSession(); return Promise.resolve(); }
+    if (meRequest) return meRequest;
+    $("refresh-profile").disabled = true;
+    meRequest = (async () => {
+      try {
+        const data = await api("/api/me", { auth: true });
+        if (data.traveler_no == null || typeof data.is_admin !== "boolean") throw new Error("Не удалось проверить профиль. Повтори вход.");
+        me = data; sessionError = "";
+      } catch (error) { me = null; sessionError = message(error); }
+      finally {
+        meRequest = null; $("refresh-profile").disabled = false; renderSession();
+        if (!initialViewApplied && me) {
+          initialViewApplied = true;
+          const requested = new URLSearchParams(location.search).get("view");
+          if (requested === "admin" && isAdmin()) setView("admin", false);
+          else if (["profile", "wallet", "support"].includes(requested)) setView(requested, false);
+        }
+      }
+    })();
+    return meRequest;
+  }
+  function setView(view, focus = true) {
+    if (!["catalog", "profile", "wallet", "support", "admin"].includes(view) || (view === "admin" && !isAdmin())) return;
+    currentView = view;
+    document.querySelectorAll("[data-page]").forEach(page => { page.hidden = page.dataset.page !== view; });
+    document.querySelectorAll("[data-view]").forEach(control => {
+      if (control.dataset.view === view) control.setAttribute("aria-current", "page");
+      else control.removeAttribute("aria-current");
+    });
+    scroller.scrollTo({ top: 0, behavior: "instant" });
+    if (focus && view !== "catalog") $(`${view}-title`).focus({ preventScroll: true });
+    if (view === "catalog") requestAnimationFrame(positionTrack);
+    if (view === "admin") loadAdmin();
+  }
+
+  function uuid() {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  function openOrder(id) {
+    if (!catalogReady || !me || !initData() || orderBusy || dialog.open) return;
+    const product = products.find(item => item.id === id), kind = orderKind(product);
+    if (!kind) return;
+    const signature = JSON.stringify([me.traveler_no, id, kind]);
+    try {
+      if (!orderKeys.has(signature)) orderKeys.set(signature, { key: uuid(), product: { ...product }, kind, attempted: false });
+      orderIntent = orderKeys.get(signature);
+      orderIntent.signature = signature;
+      orderIntent.done = false;
+      $("order-title").textContent = kind === "preorder" ? "Подтверждение предзаказа" : "Подтверждение заказа";
+      $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "preorder" ? "\nСейчас нет в наличии. Срок поступления уточни у поддержки." : ""}`;
+      feedback("order-feedback", orderIntent.attempted ? "Предыдущая отправка не подтверждена. Повтор использует тот же ключ заявки, чтобы не создать дубликат." : "");
+      $("confirm-order").hidden = false; $("confirm-order").disabled = false;
+      $("confirm-order").textContent = orderIntent.attempted ? "Повторить ту же заявку" : "Подтвердить заявку";
+      $("cancel-order").textContent = "Отмена"; $("cancel-order").disabled = false;
+      $("order-support").hidden = true;
+      dialog.showModal();
+      $("cancel-order").focus();
+    } catch { feedback("global-message", "Не удалось открыть безопасное подтверждение. Обнови Telegram или обратись в поддержку.", true); }
+  }
+  async function submitOrder() {
+    if (!orderIntent || orderIntent.done || orderBusy || !me || !initData()) return;
+    const intent = orderIntent;
+    if (!intent.attempted) {
+      const current = products.find(item => item.id === intent.product.id);
+      if (!catalogReady || !current || current.price !== intent.product.price || orderKind(current) !== intent.kind) {
+        feedback("order-feedback", "Цена или наличие изменились. Закрой окно и обнови каталог перед оформлением.", true);
+        $("confirm-order").disabled = true;
+        orderKeys.delete(intent.signature);
+        return;
+      }
+    }
+    orderBusy = true;
+    $("confirm-order").disabled = true; $("cancel-order").disabled = true;
+    dialog.setAttribute("aria-busy", "true");
+    feedback("order-feedback", "Отправляем заявку…");
+    intent.attempted = true;
+    try {
+      const result = await api("/api/order", { method: "POST", auth: true, body: { cart: [{ id: intent.product.id, qty: 1 }], kind: intent.kind, comment: "", idempotency_key: intent.key } });
+      intent.done = true;
+      orderKeys.delete(intent.signature);
+      const id = result?.id ?? result?.order_id ?? result?.order?.id;
+      feedback("order-feedback", `Заявка${id != null ? " № " + String(id) : ""} принята. Оплата не производилась. Свяжись с поддержкой для оплаты и получения товара.`);
+      $("confirm-order").hidden = true;
+      $("cancel-order").textContent = "Закрыть";
+      $("order-support").hidden = false;
+      loadCatalog(); loadMe();
+    } catch (error) {
+      feedback("order-feedback", message(error) + " Результат отправки не подтверждён. Повтори ту же заявку или уточни её состояние у поддержки; повтор сохраняет ключ заявки.", true);
+      $("confirm-order").textContent = "Повторить ту же заявку";
+      $("order-support").hidden = false;
+      loadCatalog();
+    } finally {
+      orderBusy = false; dialog.removeAttribute("aria-busy");
+      $("confirm-order").disabled = !me;
+      $("cancel-order").disabled = false;
+      if (dialog.open) (intent.done ? $("cancel-order") : $("confirm-order")).focus();
+    }
+  }
+
+  function syncAdminControls() {
+    const locked = !isAdmin() || !adminReady || adminBusy || Boolean(adminRequest);
+    $("category-fields").disabled = locked;
+    $("product-fields").disabled = locked;
+    $("refresh-admin").disabled = adminBusy || Boolean(adminRequest) || !isAdmin();
+    document.querySelectorAll("#admin-categories button, #admin-products button, #admin-orders button").forEach(control => { control.disabled = locked; });
+    categoryForm.elements.namedItem("slug").readOnly = editingCategory !== null;
+    categoryForm.elements.namedItem("active").disabled = editingCategory === null;
+    productForm.elements.namedItem("active").disabled = editingProduct === null;
+  }
+  function resetCategory() {
+    editingCategory = null; categoryForm.reset();
+    $("category-form-title").textContent = "Новая категория";
+    syncAdminControls();
+  }
+  function resetProduct() {
+    editingProduct = null; productForm.reset();
+    $("product-form-title").textContent = "Новый товар";
+    syncAdminControls();
+  }
+  function editCategory(category) {
+    if (adminBusy || adminRequest || !isAdmin()) return;
+    editingCategory = category.id;
+    categoryForm.elements.namedItem("name").value = category.name ?? "";
+    categoryForm.elements.namedItem("slug").value = category.slug;
+    categoryForm.elements.namedItem("active").checked = enabled(category.active);
+    $("category-form-title").textContent = "Изменить категорию";
+    feedback("category-feedback"); syncAdminControls();
+    categoryForm.elements.namedItem("name").focus();
+  }
+  function editProduct(product) {
+    if (adminBusy || adminRequest || !isAdmin()) return;
+    editingProduct = product.id;
+    ["name", "description", "price", "category", "stock"].forEach(key => { productForm.elements.namedItem(key).value = product[key] ?? (key === "price" || key === "stock" ? 0 : ""); });
+    productForm.elements.namedItem("active").checked = enabled(product.active);
+    productForm.elements.namedItem("allow_preorder").checked = enabled(product.allow_preorder);
+    $("product-form-title").textContent = "Изменить товар";
+    feedback("product-feedback"); syncAdminControls();
+    productForm.elements.namedItem("name").focus();
+  }
+  function renderAdminCatalog() {
+    $("admin-categories").replaceChildren(); $("admin-products").replaceChildren();
+    if (!adminCategories.length) $("admin-categories").append(node("p", "", "Категорий пока нет. Создай первую ниже."));
+    adminCategories.forEach(category => {
+      const row = node("article", "admin-row");
+      row.append(node("h3", "", category.name), node("p", "", `${category.slug} · ${enabled(category.active) ? "Показывается" : "Скрыта"}`), button("Изменить категорию", () => editCategory(category)));
+      $("admin-categories").append(row);
+    });
+    const select = productForm.elements.namedItem("category"), previousValue = select.value;
+    select.replaceChildren();
+    const placeholder = node("option", "", "Выбери категорию"); placeholder.value = ""; select.append(placeholder);
+    adminCategories.forEach(category => {
+      const option = node("option", "", category.name + (enabled(category.active) ? "" : " (скрыта)"));
+      option.value = category.slug; select.append(option);
+    });
+    select.value = adminCategories.some(category => category.slug === previousValue) ? previousValue : "";
+    if (!adminProducts.length) $("admin-products").append(node("p", "", "Товаров пока нет. Добавь реальные варианты ниже."));
+    adminProducts.forEach(product => {
+      const row = node("article", "admin-row");
+      row.append(node("h3", "", product.name), node("p", "", `${product.category} · ${integer(product.price) && product.price > 0 ? money(product.price) : "Цена не задана"} · Остаток: ${integer(product.stock) ? product.stock : 0} · ${enabled(product.active) ? "Показывается" : "Скрыт"}${enabled(product.allow_preorder) ? " · Предзаказ разрешён" : ""}`), button("Изменить товар", () => editProduct(product)));
+      $("admin-products").append(row);
+    });
+  }
+  const statusNames = new Map([["new", "Новый"], ["preorder", "Предзаказ"], ["paid", "Оплачен"], ["done", "Выдан"], ["cancelled", "Отменён"]]);
+  const transitions = new Map([["new", ["paid", "cancelled"]], ["paid", ["done"]], ["preorder", ["paid", "cancelled"]]]);
+  function renderOrders(orders) {
+    $("admin-orders").replaceChildren();
+    if (!orders.length) $("admin-orders").append(node("p", "", "Заказов пока нет."));
+    orders.forEach(order => {
+      const row = node("article", "order-row");
+      row.append(node("h3", "", `Заказ № ${order.id} · ${statusNames.get(order.status) || order.status}`));
+      const date = new Date(order.created_at);
+      const created = Number.isNaN(date.getTime()) ? String(order.created_at ?? "—") : date.toLocaleString("ru-RU");
+      row.append(node("p", "", `Покупатель: ${order.user_id} · ${integer(order.total) ? money(order.total) : "Сумма не указана"}\n${created}`));
+      let items = order.items;
+      if (typeof items === "string") { try { items = JSON.parse(items); } catch { /* Preserve readable server text below. */ } }
+      if (Array.isArray(items)) {
+        const list = node("ul");
+        items.forEach(item => list.append(node("li", "", typeof item === "object" && item ? `${item.name ?? item.product_name ?? item.product?.name ?? "Товар " + (item.id ?? item.product_id ?? "")} × ${item.qty ?? item.quantity ?? 1}` : String(item))));
+        row.append(list);
+      } else row.append(node("p", "", typeof items === "string" ? items : "Состав заказа не указан"));
+      const controls = node("div", "form-actions");
+      (transitions.get(order.status) || []).forEach(status => {
+        controls.append(button(status === "paid" ? "Отметить оплату" : status === "done" ? "Отметить выдачу" : "Отменить заказ", () => changeOrderStatus(order, status)));
+      });
+      row.append(controls); $("admin-orders").append(row);
+    });
+  }
+  function loadAdmin() {
+    if (!isAdmin()) return Promise.resolve();
+    if (adminRequest) return adminRequest;
+    if (adminBusy) return Promise.resolve();
+    feedback("admin-feedback", "Загружаем каталог управления…");
+    feedback("orders-feedback", "Загружаем заказы…");
+    adminRequest = Promise.all([
+      (async () => {
+        try {
+          const data = await api("/api/admin/catalog", { auth: true });
+          if (!Array.isArray(data.categories) || !Array.isArray(data.products)) throw new Error("Неверный формат каталога управления.");
+          if (!isAdmin()) return;
+          adminCategories = data.categories; adminProducts = data.products; adminReady = true;
+          renderAdminCatalog(); feedback("admin-feedback");
+        } catch (error) {
+          adminReady = false;
+          feedback("admin-feedback", message(error) + " Нажми «Обновить данные».", true);
+        }
+      })(),
+      (async () => {
+        try {
+          const data = await api("/api/admin/orders", { auth: true });
+          if (!Array.isArray(data.orders)) throw new Error("Неверный формат списка заказов.");
+          if (!isAdmin()) return;
+          renderOrders(data.orders); feedback("orders-feedback");
+        } catch (error) { $("admin-orders").replaceChildren(); feedback("orders-feedback", message(error) + " Нажми «Обновить данные».", true); }
+      })()
+    ]).finally(() => { adminRequest = null; syncAdminControls(); });
+    syncAdminControls();
+    return adminRequest;
+  }
+  async function saveAdmin(path, method, payload, feedbackId, afterSave) {
+    if (!isAdmin() || adminBusy || adminRequest || !adminReady) return;
+    adminBusy = true; syncAdminControls(); feedback(feedbackId, "Сохраняем…");
+    let saved = false;
+    try {
+      await api(path, { method, body: payload, auth: true });
+      saved = true; afterSave?.();
+      feedback(feedbackId, "Сохранено.");
+    } catch (error) { feedback(feedbackId, message(error) + " Изменения не подтверждены. Перед повтором обнови данные и проверь результат.", true); }
+    finally { adminBusy = false; syncAdminControls(); }
+    if (saved) {
+      const adminRefresh = loadAdmin();
+      // Wait out any older public request before fetching the committed values.
+      if (catalogRequest) await catalogRequest;
+      await Promise.all([loadCatalog(), adminRefresh]);
+      if (feedbackId === "orders-feedback" && isAdmin() && !$(feedbackId).classList.contains("error")) feedback(feedbackId, "Статус заказа сохранён.");
+    }
+  }
+  async function changeOrderStatus(order, status) {
+    if (!isAdmin() || adminBusy || adminRequest || !(transitions.get(order.status) || []).includes(status)) return;
+    const question = status === "paid" ? `Оплата заказа № ${order.id} действительно получена?` : status === "done" ? `Товар по заказу № ${order.id} действительно выдан?` : `Отменить заказ № ${order.id}?`;
+    if (!window.confirm(question)) return;
+    await saveAdmin(`/api/admin/orders/${encodeURIComponent(order.id)}`, "PATCH", { status }, "orders-feedback");
+  }
+
+  categoryForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!isAdmin() || adminBusy || adminRequest || !categoryForm.reportValidity()) return;
+    const name = categoryForm.elements.namedItem("name").value.trim();
+    const slug = categoryForm.elements.namedItem("slug").value.trim();
+    if (!name) { feedback("category-feedback", "Укажи название категории.", true); return; }
+    const creating = editingCategory === null;
+    const payload = creating ? { name, slug, active: true } : { name, active: categoryForm.elements.namedItem("active").checked };
+    await saveAdmin(creating ? "/api/admin/categories" : `/api/admin/categories/${encodeURIComponent(editingCategory)}`, creating ? "POST" : "PATCH", payload, "category-feedback", resetCategory);
+  });
+  productForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!isAdmin() || adminBusy || adminRequest || !productForm.reportValidity()) return;
+    const field = key => productForm.elements.namedItem(key);
+    const price = Number(field("price").value), stock = Number(field("stock").value);
+    const name = field("name").value.trim(), category = field("category").value;
+    if (!name || !integer(price) || !integer(stock) || !adminCategories.some(item => item.slug === category)) { feedback("product-feedback", "Укажи название, категорию, целую неотрицательную цену и остаток.", true); return; }
+    const creating = editingProduct === null;
+    const payload = { name, description: field("description").value.trim(), price, category, stock, active: creating ? true : field("active").checked, allow_preorder: field("allow_preorder").checked };
+    await saveAdmin(creating ? "/api/admin/products" : `/api/admin/products/${encodeURIComponent(editingProduct)}`, creating ? "POST" : "PATCH", payload, "product-feedback", resetProduct);
+  });
+  $("reset-category").addEventListener("click", () => { if (!adminBusy && !adminRequest) { resetCategory(); feedback("category-feedback"); } });
+  $("reset-product").addEventListener("click", () => { if (!adminBusy && !adminRequest) { resetProduct(); feedback("product-feedback"); } });
+  $("refresh-admin").addEventListener("click", loadAdmin);
+  $("retry-config").addEventListener("click", loadConfig);
+  $("retry-catalog").addEventListener("click", loadCatalog);
+  $("refresh-profile").addEventListener("click", loadMe);
+  $("confirm-order").addEventListener("click", submitOrder);
+  $("cancel-order").addEventListener("click", () => { if (!orderBusy) dialog.close(); });
+  dialog.addEventListener("cancel", event => { if (orderBusy) event.preventDefault(); });
+  dialog.addEventListener("close", () => {
+    if (orderIntent && !orderIntent.attempted) orderKeys.delete(orderIntent.signature);
+    if (currentView === "catalog" && !catalog.hidden) viewport.focus({ preventScroll: true });
+  });
+  document.querySelectorAll("[data-view]").forEach(control => control.addEventListener("click", () => setView(control.dataset.view)));
+  document.querySelectorAll(".pixel-btn").forEach(control => control.addEventListener("click", () => selectProvider(control.dataset.provider)));
+  previous.addEventListener("click", () => { if (performance.now() >= suppressClickUntil) goTo(activeIndex - 1); });
+  next.addEventListener("click", () => { if (performance.now() >= suppressClickUntil) goTo(activeIndex + 1); });
+  catalog.addEventListener("keydown", event => {
+    const actions = new Map([["ArrowLeft", activeIndex - 1], ["ArrowRight", activeIndex + 1], ["Home", 0], ["End", availableProducts().length - 1]]);
+    if (!actions.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+    event.preventDefault(); goTo(actions.get(event.key));
+    if (pagination.contains(event.target)) pagination.children[activeIndex]?.focus({ preventScroll: true });
+  });
+  viewport.addEventListener("pointerdown", event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
+  });
+  viewport.addEventListener("pointerup", event => {
+    if (!pointerStart || pointerStart.id !== event.pointerId) return;
+    const dx = event.clientX - pointerStart.x, dy = event.clientY - pointerStart.y;
+    pointerStart = null;
+    if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.3) return;
+    suppressClickUntil = performance.now() + 350;
+    goTo(activeIndex + (dx < 0 ? 1 : -1));
+  });
+  viewport.addEventListener("pointercancel", () => { pointerStart = null; });
+  viewport.addEventListener("pointerleave", () => { pointerStart = null; });
+  if ("ResizeObserver" in window) new ResizeObserver(positionTrack).observe(viewport);
+  else window.addEventListener("resize", positionTrack);
+
+  function syncViewport() {
+    if (Number.isFinite(app?.viewportHeight) && app.viewportHeight > 0) document.documentElement.style.setProperty("--app-height", `${app.viewportHeight}px`);
+    [["safeAreaInset", "safe-area-inset"], ["contentSafeAreaInset", "content-safe-area-inset"]].forEach(([property, variable]) => {
+      ["top", "bottom", "left", "right"].forEach(side => {
+        const value = app?.[property]?.[side];
+        if (Number.isFinite(value) && value >= 0) document.documentElement.style.setProperty(`--tg-${variable}-${side}`, `${value}px`);
+      });
+    });
+    positionTrack();
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") return;
+    loadCatalog(); loadMe();
+    if (!config) loadConfig();
+    if (currentView === "admin") loadAdmin();
+  });
+  document.addEventListener("DOMContentLoaded", () => {
+    app = window.Telegram?.WebApp;
+    try {
+      app?.ready(); app?.expand();
+      if (app?.isVersionAtLeast?.("6.1")) { app.setHeaderColor?.("#16100d"); app.setBackgroundColor?.("#16100d"); }
+      if (app?.isVersionAtLeast?.("7.10")) app.setBottomBarColor?.("#16100d");
+      ["viewportChanged", "safeAreaChanged", "contentSafeAreaChanged"].forEach(event => app?.onEvent?.(event, syncViewport));
+    } catch { /* Browsing remains available without Telegram bridge features. */ }
+    syncViewport();
+    setArt("hero-image", "/static/bg.jpg", "/static/bg.jpg", "hero-fallback");
+    setArt("profile-image", "/api/art/profile", "/static/bg.jpg", "profile-fallback");
+    setArt("support-image", "/api/art/support", "/static/bg.jpg", "support-fallback");
+    renderSession(); renderCategories();
+    loadConfig(); loadCatalog(); loadMe();
+    if (!initData()) {
+      const requested = new URLSearchParams(location.search).get("view");
+      if (["profile", "wallet", "support"].includes(requested)) setView(requested, false);
+    }
+  });
+})();
 </script>
 </body>
 </html>
