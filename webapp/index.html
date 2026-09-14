@@ -14,7 +14,6 @@
 
 body, html {
   background-color: var(--bg);
-  /* Убираем стандартный скролл, сделаем свой, чтобы фон был 100% статичным на iOS/Android */
   height: 100%;
   overflow: hidden; 
 }
@@ -26,7 +25,8 @@ body, html {
   left: 0; 
   width: 100%; 
   height: 100%;
-  background: url('stone_wall_bg.jpg') center center / cover no-repeat;
+  /* Используем файл с новым именем, без знаков вопроса, чтобы сервер не выдавал ошибку */
+  background: url('stone_wall_bg_v2.jpg') center center / cover no-repeat;
   z-index: 0;
 }
 
@@ -51,10 +51,10 @@ body, html {
   position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
-  background: url('bg.jpg?v=1') center center / contain no-repeat;
-  background-color: var(--bg); /* Закрывает каменный фон под собой */
+  /* Используем файл с новым именем */
+  background: url('bg_v2.jpg') center center / contain no-repeat;
+  background-color: var(--bg);
   z-index: 10;
-  /* Легкая тень снизу для перехода */
   box-shadow: 0 10px 20px rgba(0,0,0,0.8);
 }
 
@@ -84,13 +84,15 @@ body, html {
 }
 
 .btn-chatgpt {
-  background-image: url('gpt_user.png?v=5'); 
+  /* Используем файлы с новыми именами */
+  background-image: url('gpt_user_v2.png'); 
   bottom: 11.5%; 
   left: 20%;
 }
 
 .btn-gemini {
-  background-image: url('gemini_user.png?v=5'); 
+  /* Используем файлы с новыми именами */
+  background-image: url('gemini_user_v2.png'); 
   bottom: 11.5%; 
   right: 20%;
 }
@@ -105,8 +107,8 @@ body, html {
 }
 
 .card {
-  background: rgba(20, 15, 15, 0.75); /* Полупрозрачный темный фон */
-  border: 2px solid #4a3424; /* Деревянная рамка */
+  background: rgba(20, 15, 15, 0.75);
+  border: 2px solid #4a3424;
   border-radius: 12px;
   height: 180px;
   display: flex;
@@ -117,7 +119,7 @@ body, html {
   font-family: sans-serif;
   font-weight: bold;
   box-shadow: 0 6px 12px rgba(0,0,0,0.6);
-  backdrop-filter: blur(4px); /* Размытие каменного фона под карточкой */
+  backdrop-filter: blur(4px);
   transition: transform 0.1s;
 }
 
@@ -125,7 +127,6 @@ body, html {
   transform: scale(0.96);
 }
 
-/* Декоративная иконка зелья или свитка в карточке */
 .card-icon {
   width: 48px;
   height: 48px;
@@ -138,10 +139,8 @@ body, html {
 </head>
 <body>
 
-<!-- Статичный фон (Каменная стена с факелами) -->
 <div class="fixed-bg"></div>
 
-<!-- Скроллируемая область -->
 <div class="scroll-container">
   <div class="wrap">
     <section class="hero">
@@ -154,7 +153,6 @@ body, html {
 
     <!-- Секция товаров -->
     <section class="shop-content">
-      <!-- Тестовые карточки -->
       <div class="card"><div class="card-icon"></div>Товар 1</div>
       <div class="card"><div class="card-icon"></div>Товар 2</div>
       <div class="card"><div class="card-icon"></div>Товар 3</div>
