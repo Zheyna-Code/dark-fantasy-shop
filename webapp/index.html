@@ -3,432 +3,177 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Лавка Странника</title>
+<title>Лавка Странника - Идеальные Кнопки</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <style>
-:root{
-  --pixel:#c9a227;
-  --pixel-dim:#6b5518;
-  --text:#e8dcc4;
-  --muted:#9a8a6f;
-  --deep:#0d0503;
+:root {
+  --bg: #1a1210;
 }
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-body{
-  background:#0b0b1e;
-  color:var(--text);
-  font-family:'Press Start 2P',monospace;
-  font-size:11px;
-  line-height:1.7;
-  overflow-x:hidden;
+
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+body, html {
+  background-color: var(--bg);
+  /* Убираем стандартный скролл, сделаем свой, чтобы фон был 100% статичным на iOS/Android */
+  height: 100%;
+  overflow: hidden; 
 }
-canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
-.wrap{max-width:520px;margin:0 auto;position:relative}
 
-/* ===== ШАПКА: ЗАМОК + ЛУГ + ЛЕС ===== */
-.hero{height:100vh;position:relative;display:flex;flex-direction:column;align-items:center;padding-top:48px}
-#heroCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:0}
-.title{position:relative;z-index:2;color:#fff;font-size:19px;text-align:center;line-height:2;letter-spacing:2px;text-shadow:3px 3px 0 #000,0 0 22px rgba(201,162,39,.55);animation:glow 2.4s ease-in-out infinite}
-@keyframes glow{0%,100%{text-shadow:3px 3px 0 #000,0 0 22px rgba(201,162,39,.55)}50%{text-shadow:3px 3px 0 #000,0 0 40px rgba(201,162,39,.85)}}
-.subtitle{position:relative;z-index:2;color:#cfe8cf;font-size:8px;letter-spacing:3px;margin-top:10px;text-shadow:2px 2px 0 #000}
-.scroll-hint{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);z-index:2;color:var(--pixel);font-size:8px;text-align:center;line-height:2;text-shadow:2px 2px 0 #000;animation:bob 1.6s ease-in-out infinite}
-@keyframes bob{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(7px)}}
-
-/* ===== СПУСК: ЛЕСТНИЦА СЛЕВА + КАРТОЧКИ СПРАВА ===== */
-.descent{position:relative;padding:30px 0 150px}
-#stairsCanvas{position:absolute;left:0;top:0;width:42%;height:100%;z-index:0}
-.cards{position:relative;z-index:1;margin-left:46%;padding-right:14px;display:flex;flex-direction:column;gap:26px}
-.cards-title{color:var(--pixel);font-size:11px;text-align:center;text-shadow:2px 2px 0 #000;margin-bottom:4px}
-
-/* квадратная карточка с прозрачным размытым фоном */
-.card{
-  aspect-ratio:1/1;
-  background:rgba(22,14,10,.45);
-  backdrop-filter:blur(8px);
-  -webkit-backdrop-filter:blur(8px);
-  border:3px solid var(--pixel);
-  box-shadow:0 0 0 3px rgba(0,0,0,.55), 7px 7px 0 rgba(0,0,0,.45), inset 0 0 26px rgba(0,0,0,.5);
-  padding:12px;
-  display:flex;
-  flex-direction:column;
-  justify-content:space-between;
+/* Статичный каменный фон */
+.fixed-bg {
+  position: fixed;
+  top: 0; 
+  left: 0; 
+  width: 100%; 
+  height: 100%;
+  background: url('stone_wall_bg.jpg') center center / cover no-repeat;
+  z-index: 0;
 }
-.card-top{display:flex;align-items:center;gap:10px}
-.pixel-icon{width:52px;height:52px;background:#000;border:2px solid var(--pixel);flex-shrink:0}
-.card-name{color:#fff;font-size:10px;line-height:1.7;text-shadow:2px 2px 0 #000;word-break:break-word}
-.card-desc{color:var(--muted);font-size:8px;line-height:1.9}
-.card-bottom{display:flex;flex-direction:column;gap:10px}
-.price{color:var(--pixel);font-size:12px;text-shadow:2px 2px 0 #000}
-.buy-btn{
-  background:linear-gradient(180deg,#e0b93a,#b58f1e);
-  color:#1a1207;border:none;font-family:inherit;font-size:9px;
-  padding:11px 0;cursor:pointer;letter-spacing:1px;
-  box-shadow:0 5px 0 var(--pixel-dim), 0 9px 16px rgba(0,0,0,.55);
-  transition:transform .06s, box-shadow .06s;
+
+/* Основной контейнер, который скроллится */
+.scroll-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 1;
 }
-.buy-btn:active{transform:translateY(5px);box-shadow:0 0 0 var(--pixel-dim), 0 2px 6px rgba(0,0,0,.5)}
 
-/* ===== НИЗ / КОРЗИНА ===== */
-.bottom-bar{position:fixed;bottom:0;left:0;right:0;z-index:10;background:linear-gradient(transparent,var(--deep) 40%);padding:22px 16px}
-.cart-btn{width:100%;max-width:480px;margin:0 auto;display:block;background:var(--pixel);color:#1a1207;border:none;font-family:inherit;font-size:10px;padding:15px;cursor:pointer;box-shadow:0 5px 0 var(--pixel-dim),0 9px 18px rgba(0,0,0,.6)}
-.cart-btn:active{transform:translateY(4px);box-shadow:0 1px 0 var(--pixel-dim)}
+.wrap {
+  max-width: 520px;
+  margin: 0 auto;
+  position: relative;
+}
 
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:20;display:none;align-items:center;justify-content:center;padding:18px}
-.overlay.open{display:flex}
-.modal{background:#140e0a;border:3px solid var(--pixel);padding:20px;max-width:400px;width:100%;box-shadow:10px 10px 0 rgba(0,0,0,.8)}
-.modal h2{color:var(--pixel);font-size:12px;text-align:center;margin-bottom:16px;line-height:1.9}
-.cart-item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-bottom:2px dashed var(--pixel-dim);font-size:8px;line-height:1.8}
-.qty-ctl{display:flex;align-items:center;gap:7px}
-.qty-ctl button{width:22px;height:22px;background:#000;border:2px solid var(--pixel-dim);color:var(--pixel);font-family:inherit;font-size:10px;cursor:pointer}
-.total{color:var(--pixel);font-size:12px;text-align:right;margin:14px 0}
-.modal-btn{width:100%;background:var(--pixel);color:#1a1207;border:none;font-family:inherit;font-size:10px;padding:13px;cursor:pointer;box-shadow:0 4px 0 var(--pixel-dim)}
-.modal-btn:active{transform:translateY(4px);box-shadow:none}
-.close-x{float:right;background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;font-family:inherit}
-.success{text-align:center;padding:16px}
-.success-icon{font-size:34px;color:var(--pixel);margin-bottom:14px;animation:glow 1.5s ease-in-out infinite}
+/* ===== HERO SECTION ===== */
+.hero {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: url('bg.jpg?v=1') center center / contain no-repeat;
+  background-color: var(--bg); /* Закрывает каменный фон под собой */
+  z-index: 10;
+  /* Легкая тень снизу для перехода */
+  box-shadow: 0 10px 20px rgba(0,0,0,0.8);
+}
+
+/* ===== КНОПКИ ===== */
+.pixel-btn {
+  position: absolute;
+  width: 64px;
+  height: 64px;
+  
+  background-size: 100% 100%; 
+  background-position: center;
+  background-repeat: no-repeat;
+  
+  border: none;
+  background-color: transparent; 
+  cursor: pointer;
+  outline: none;
+  z-index: 30;
+  
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.7));
+  transition: transform 0.1s, filter 0.1s;
+}
+
+.pixel-btn:active {
+  transform: translateY(4px);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.9));
+}
+
+.btn-chatgpt {
+  background-image: url('gpt_user.png?v=5'); 
+  bottom: 11.5%; 
+  left: 20%;
+}
+
+.btn-gemini {
+  background-image: url('gemini_user.png?v=5'); 
+  bottom: 11.5%; 
+  right: 20%;
+}
+
+/* ===== КАРТОЧКИ ТОВАРОВ ===== */
+.shop-content {
+  padding: 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding-bottom: 40px;
+}
+
+.card {
+  background: rgba(20, 15, 15, 0.75); /* Полупрозрачный темный фон */
+  border: 2px solid #4a3424; /* Деревянная рамка */
+  border-radius: 12px;
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #e0d0b8;
+  font-family: sans-serif;
+  font-weight: bold;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px); /* Размытие каменного фона под карточкой */
+  transition: transform 0.1s;
+}
+
+.card:active {
+  transform: scale(0.96);
+}
+
+/* Декоративная иконка зелья или свитка в карточке */
+.card-icon {
+  width: 48px;
+  height: 48px;
+  background: #3a2618;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  border: 1px solid #6b4c3a;
+}
 </style>
 </head>
 <body>
 
-<div class="wrap">
-  <section class="hero">
-    <canvas id="heroCanvas"></canvas>
-    <h1 class="title">ЛАВКА<br>СТРАННИКА</h1>
-    <div class="subtitle">ЗЕЛЬЯ · СВЕЧИ · РЕЛИКВИИ</div>
-    <div class="scroll-hint">▼<br>СПУСТИСЬ<br>В НЕДРА<br>▼</div>
-  </section>
+<!-- Статичный фон (Каменная стена с факелами) -->
+<div class="fixed-bg"></div>
 
-  <section class="descent">
-    <canvas id="stairsCanvas"></canvas>
-    <div class="cards">
-      <div class="cards-title"><> ТОВАРЫ <></div>
-      <div id="catalog" style="display:flex;flex-direction:column;gap:26px"></div>
-    </div>
-  </section>
-</div>
+<!-- Скроллируемая область -->
+<div class="scroll-container">
+  <div class="wrap">
+    <section class="hero">
+      <!-- Кнопка ChatGPT -->
+      <button class="pixel-btn btn-chatgpt" onclick="playClick()"></button>
 
-<div class="bottom-bar">
-  <button class="cart-btn" onclick="openCart()">СУМКА [<span id="cartCount">0</span>]</button>
-</div>
+      <!-- Кнопка Gemini -->
+      <button class="pixel-btn btn-gemini" onclick="playClick()"></button>
+    </section>
 
-<div class="overlay" id="overlay" onclick="if(event.target===this)closeCart()">
-  <div class="modal" id="modal"></div>
+    <!-- Секция товаров -->
+    <section class="shop-content">
+      <!-- Тестовые карточки -->
+      <div class="card"><div class="card-icon"></div>Товар 1</div>
+      <div class="card"><div class="card-icon"></div>Товар 2</div>
+      <div class="card"><div class="card-icon"></div>Товар 3</div>
+      <div class="card"><div class="card-icon"></div>Товар 4</div>
+      <div class="card"><div class="card-icon"></div>Товар 5</div>
+      <div class="card"><div class="card-icon"></div>Товар 6</div>
+    </section>
+  </div>
 </div>
 
 <script>
-const tg = window.Telegram?.WebApp;
-if (tg){ tg.ready(); tg.expand(); tg.setHeaderColor('#0b0b1e'); tg.setBackgroundColor('#0b0b1e'); }
+  const tg = window.Telegram?.WebApp;
+  if (tg) { tg.ready(); tg.expand(); }
 
-let seed = 42;
-const rnd = () => { seed = (seed*16807)%2147483647; return seed/2147483647; };
-const px = (c,x,y,w,h,col) => { c.fillStyle=col; c.fillRect(x,y,w,h); };
-
-/* ================= ЗАМОК + ЛУГ + ЛЕС ================= */
-const hc = document.getElementById('heroCanvas');
-const hx = hc.getContext('2d');
-const S = 3;
-
-function pine(c,x,yBase,size,col){
-  for(let i=0;i<5;i++){
-    const pw = size - i*2;
-    px(c, x+i, yBase - i*2 - 2, pw, 2, col);
-  }
-  px(c, x+Math.floor(size/2), yBase-1, 1, 3, col);
-}
-
-function forestLayer(c,w,yBase,col,size){
-  for(let x=-4;x<w+4;x+=Math.floor(size*0.85)) pine(c,x,yBase,size,col);
-}
-
-function windowLit(c,x,y,on){
-  px(c,x-1,y-1,6,8,'#141420');
-  px(c,x,y,4,6, on ? '#ffd35a' : '#1b1b2c');
-  if(on) px(c,x+1,y+1,2,2,'#fff2b0');
-}
-
-function tower(c,x,gy,tw,th,roofCol){
-  px(c,x,gy-th,tw,th,'#32324a');
-  for(let y=gy-th+3;y<gy;y+=4) px(c,x,y,tw,1,'#28283c');
-  for(let y=gy-th+3;y<gy;y+=4) px(c,x+((y/4)%2?3:7),y,1,3,'#28283c');
-  for(let i=0;i<tw;i+=4) px(c,x+i,gy-th-3,2,3,'#32324a');
-  const rx=x+tw/2;
-  for(let i=0;i<8;i++) px(c,rx-8+i, gy-th-3-8+i, 16-i*2, 1, roofCol);
-  px(c,rx-1,gy-th-16,1,6,'#5a5a5a');
-  px(c,rx,gy-th-16,6,4,'#8a2f2f');
-  px(c,rx+5,gy-th-15,1,2,'#8a2f2f');
-}
-
-function drawHero(){
-  seed = 42;
-  hc.width = hc.offsetWidth / S;
-  hc.height = hc.offsetHeight / S;
-  const w=hc.width, h=hc.height, c=hx;
-
-  const sky = c.createLinearGradient(0,0,0,h);
-  sky.addColorStop(0,'#0d0d26');
-  sky.addColorStop(.6,'#141031');
-  sky.addColorStop(1,'#1a1030');
-  c.fillStyle=sky; c.fillRect(0,0,w,h);
-
-  for(let i=0;i<70;i++){
-    const x=rnd()*w, y=rnd()*h*0.5, s=rnd()<0.85?1:2;
-    px(c,x,y,s,s, rnd()<0.2 ? '#fff6c8' : '#ffffff');
-  }
-  c.fillStyle='#e8dcc4'; c.beginPath(); c.arc(w*0.8,h*0.13,7,0,7); c.fill();
-  c.fillStyle='#0d0d26'; c.beginPath(); c.arc(w*0.83,h*0.11,6,0,7); c.fill();
-
-  forestLayer(c,w,h*0.60,'#0c2415',10);
-  forestLayer(c,w,h*0.67,'#10301c',12);
-  forestLayer(c,w,h*0.74,'#154023',14);
-
-  const gy = h*0.80;
-  px(c,0,gy,w,h-gy,'#1d5a2e');
-  px(c,0,gy,w,2,'#2e7a3e');
-  for(let i=0;i<w;i+=2) if(rnd()<0.45) px(c,i,gy-2,1,2,'#2e7a3e');
-  for(let i=0;i<26;i++){
-    const x=rnd()*w, y=gy+3+rnd()*(h-gy-6);
-    px(c,x,y,1,1, rnd()<0.5 ? '#d86a8a' : '#e8e0b0');
-  }
-
-  const gx=w*0.07, gw=w*0.36, wallH=h*0.15;
-  px(c,gx,gy-wallH,gw,wallH,'#2b2b40');
-  for(let y=gy-wallH+3;y<gy;y+=4) px(c,gx,y,gw,1,'#232338');
-  for(let y=gy-wallH+3;y<gy;y+=4) px(c,gx+((y/4)%2?4:9),y,1,3,'#232338');
-  for(let x=gx;x<gx+gw;x+=6) px(c,x,gy-wallH-3,3,3,'#2b2b40');
-
-  const gwx=Math.floor(gx+gw/2-6);
-  px(c,gwx,gy-14,12,14,'#1a1a2c');
-  px(c,gwx+1,gy-16,10,2,'#1a1a2c');
-  for(let x=gwx+1;x<gwx+11;x+=2) px(c,x,gy-14,1,14,'#0d0d16');
-  px(c,gwx-4,gy-13,1,5,'#5a4632'); px(c,gwx-5,gy-16,3,3,'#e07b39'); px(c,gwx-4,gy-17,1,1,'#ffd35a');
-  px(c,gwx+15,gy-13,1,5,'#5a4632'); px(c,gwx+14,gy-16,3,3,'#e07b39'); px(c,gwx+15,gy-17,1,1,'#ffd35a');
-  let g=c.createRadialGradient(gwx+6,gy-10,0,gwx+6,gy-10,22);
-  g.addColorStop(0,'rgba(224,123,57,.22)'); g.addColorStop(1,'transparent');
-  c.fillStyle=g; c.fillRect(gwx-18,gy-32,48,40);
-
-  tower(c, gx-7, gy, 14, wallH+h*0.13, '#5a1f2f');
-  tower(c, gx+gw-9, gy, 16, wallH+h*0.19, '#5a1f2f');
-
-  windowLit(c, gx-4, gy-wallH-h*0.07, true);
-  windowLit(c, gx+gw-5, gy-wallH-h*0.13, true);
-  windowLit(c, gx+gw-5, gy-wallH-h*0.06, false);
-  windowLit(c, gx+10, gy-wallH+6, true);
-  windowLit(c, gx+gw-16, gy-wallH+6, false);
-
-  px(c,gx+8,gy-wallH+2,4,9,'#8a2f2f');
-  px(c,gx+8,gy-wallH+11,1,1,'#8a2f2f'); px(c,gx+11,gy-wallH+11,1,1,'#8a2f2f');
-  px(c,gx+gw-14,gy-wallH+2,4,9,'#8a2f2f');
-
-  px(c,gwx+2,gy,8,3,'#3a2c1c');
-  px(c,gwx+1,gy+3,10,3,'#3a2c1c');
-  px(c,gwx,gy+6,14,3,'#3a2c1c');
-}
-
-/* ================= КАМЕННАЯ ЛЕСТНИЦА ================= */
-const sc = document.getElementById('stairsCanvas');
-const sx = sc.getContext('2d');
-
-function drawStairs(){
-  seed = 77;
-  sc.width = sc.offsetWidth / S;
-  sc.height = sc.offsetHeight / S;
-  const w=sc.width, h=sc.height, c=sx;
-
-  const g=c.createLinearGradient(0,0,0,h);
-  g.addColorStop(0,'#160d08');
-  g.addColorStop(.5,'#100804');
-  g.addColorStop(1,'#080302');
-  c.fillStyle=g; c.fillRect(0,0,w,h);
-
-  const wallW=Math.floor(w*0.22);
-  px(c,0,0,wallW,h,'#171009');
-  for(let y=0;y<h;y+=5) px(c,0,y,wallW,1,'#100a06');
-  for(let y=0;y<h;y+=5) px(c,((y/5)%2?4:9),y,1,4,'#100a06');
-
-  for(let i=0;i<6;i++){
-    const x=rnd()*wallW, y=rnd()*h;
-    px(c,x,y,1,3+rnd()*4,'#0a0603');
-  }
-
-  const stepH=9, x0=wallW+2, stepW=w-x0-3;
-  for(let y=0,i=0;y<h;y+=stepH,i++){
-    const off=(i%2)?3:0;
-    px(c,x0+off,y,stepW-off,stepH-3,'#241a12');
-    px(c,x0+off,y,stepW-off,1,'#3d2c1e');
-    px(c,x0+off,y+stepH-3,stepW-off,3,'#0c0705');
-    if(rnd()<0.25) px(c,x0+off+Math.floor(rnd()*stepW),y+2,2,1,'#1a120c');
-  }
-
-  for(let y=14;y<h;y+=46){
-    px(c,wallW-3,y,3,1,'#4a4a4a');
-    px(c,wallW-2,y-3,1,3,'#4a4a4a');
-    px(c,wallW-3,y-6,3,3,'#e07b39');
-    px(c,wallW-2,y-7,1,1,'#ffd35a');
-    const tg2=c.createRadialGradient(wallW-2,y-5,0,wallW-2,y-5,16);
-    tg2.addColorStop(0,'rgba(224,123,57,.25)'); tg2.addColorStop(1,'transparent');
-    c.fillStyle=tg2; c.fillRect(wallW-18,y-21,34,32);
-  }
-
-  for(let i=0;i<7;i++){
-    const x=w-6-rnd()*6, y=rnd()*h;
-    px(c,x,y,2,3,'#7a5fd0'); px(c,x+1,y-1,1,1,'#a98ff0');
-  }
-  for(let i=0;i<5;i++){
-    const x=x0+Math.floor(rnd()*stepW), len=4+rnd()*8;
-    px(c,x,0,1,len,'#2a1a10');
-  }
-}
-
-/* ================= ТОВАРЫ ================= */
-const FALLBACK = [
-  { id:1, name:'GEMINI', desc:'Gemini link 18m', price:40 },
-  { id:2, name:'СВЕЧА ТАВЕРНЫ', desc:'Тёплый свет странника. Горит 40 часов.', price:120 },
-  { id:3, name:'ЭЛИКСИР БОДРОСТИ', desc:'Зелье алхимика. Кофеин и капля безумия.', price:90 },
-];
-const ICONS = {
-  1:{ color:'#c9a227', p:[
-    [0,0,0,1,1,0,0,0],
-    [0,0,1,1,1,1,0,0],
-    [0,1,1,0,0,1,1,0],
-    [1,1,0,1,1,0,1,1],
-    [1,1,0,1,1,0,1,1],
-    [0,1,1,0,0,1,1,0],
-    [0,0,1,1,1,1,0,0],
-    [0,0,0,1,1,0,0,0]]},
-  2:{ color:'#e07b39', p:[
-    [0,0,0,1,0,0,0,0],
-    [0,0,1,1,1,0,0,0],
-    [0,0,1,1,1,0,0,0],
-    [0,1,1,1,1,1,0,0],
-    [0,1,1,1,1,1,0,0],
-    [0,1,1,1,1,1,0,0],
-    [1,1,1,1,1,1,1,0],
-    [0,1,1,1,1,1,0,0]]},
-  3:{ color:'#4a9b4a', p:[
-    [0,0,1,1,1,1,0,0],
-    [0,0,0,1,1,0,0,0],
-    [0,1,1,1,1,1,1,0],
-    [1,1,0,1,1,0,1,1],
-    [1,1,1,1,1,1,1,1],
-    [1,1,1,0,1,1,1,1],
-    [0,1,1,1,1,1,1,0],
-    [0,0,1,1,1,1,0,0]]},
-};
-const DEF_ICON = ICONS[1];
-
-let products = FALLBACK.slice();
-let cart = {};
-
-async function loadProducts(){
-  try{
-    const r = await fetch('/api/products');
-    if(r.ok){
-      const list = await r.json();
-      if(list.length) products = list.slice(0,6);
+  function playClick() {
+    if (tg && tg.HapticFeedback) {
+      tg.HapticFeedback.impactOccurred('medium');
     }
-  }catch(e){}
-  renderCatalog();
-}
-
-function drawIcon(id, pid){
-  const cv = document.getElementById(id);
-  if(!cv) return;
-  const ic = ICONS[pid] || DEF_ICON;
-  const x = cv.getContext('2d');
-  cv.width=8; cv.height=8;
-  x.fillStyle='#000'; x.fillRect(0,0,8,8);
-  x.fillStyle=ic.color;
-  for(let r=0;r<8;r++) for(let q=0;q<8;q++) if(ic.p[r][q]) x.fillRect(q,r,1,1);
-}
-
-function renderCatalog(){
-  document.getElementById('catalog').innerHTML = products.map(p => `
-    <div class="card">
-      <div>
-        <div class="card-top">
-          <canvas class="pixel-icon" id="icon-${p.id}"></canvas>
-          <div class="card-name">${p.name}</div>
-        </div>
-        <div class="card-desc" style="margin-top:10px">${p.description || p.desc || ''}</div>
-      </div>
-      <div class="card-bottom">
-        <div class="price">${p.price} ₽</div>
-        <button class="buy-btn" data-id="${p.id}">КУПИТЬ</button>
-      </div>
-    </div>`).join('');
-  products.forEach(p => drawIcon('icon-'+p.id, p.id));
-  document.querySelectorAll('.buy-btn').forEach(b =>
-    b.addEventListener('click', () => addToCart(+b.dataset.id)));
-}
-
-function addToCart(id){
-  cart[id]=(cart[id]||0)+1;
-  updateCart();
-  tg?.HapticFeedback?.impactOccurred('light');
-}
-const cartCount = () => Object.values(cart).reduce((a,b)=>a+b,0);
-function updateCart(){ document.getElementById('cartCount').textContent = cartCount(); }
-
-function openCart(){
-  const entries = Object.entries(cart).filter(([,q])=>q>0);
-  if(!entries.length){ (tg?.showAlert ? tg.showAlert('Сумка пуста...') : alert('Сумка пуста...')); return; }
-  const total = entries.reduce((s,[id,q])=>{
-    const p = products.find(x=>x.id==id); return s+(p?p.price*q:0);
-  },0);
-  document.getElementById('modal').innerHTML = `
-    <button class="close-x" onclick="closeCart()">X</button>
-    <h2>СУМКА СТРАННИКА</h2>
-    ${entries.map(([id,q])=>{
-      const p = products.find(x=>x.id==id);
-      return `<div class="cart-item">
-        <span>${p.name}</span>
-        <span class="qty-ctl"><button onclick="chgQty(${id},-1)">-</button>${q}<button onclick="chgQty(${id},1)">+</button></span>
-        <span style="color:var(--pixel)">${p.price*q} ₽</span>
-      </div>`;
-    }).join('')}
-    <div class="total">ИТОГ: ${total} ₽</div>
-    <button class="modal-btn" onclick="checkout()">ОФОРМИТЬ ЗАКАЗ</button>`;
-  document.getElementById('overlay').classList.add('open');
-}
-function closeCart(){ document.getElementById('overlay').classList.remove('open'); }
-function chgQty(id,d){
-  cart[id]=(cart[id]||0)+d;
-  if(cart[id]<=0) delete cart[id];
-  updateCart();
-  if(!cartCount()) closeCart(); else openCart();
-}
-
-async function checkout(){
-  const items = Object.entries(cart).map(([id,qty])=>({id:+id,qty}));
-  try{
-    const res = await fetch('/api/order',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ initData: tg?.initData || '', cart: items })
-    });
-    const data = await res.json();
-    if(data.ok){
-      cart={}; updateCart();
-      document.getElementById('modal').innerHTML = `
-        <div class="success">
-          <div class="success-icon">◆</div>
-          <h2>ЗАКАЗ №${data.order_id}<br>ПРИНЯТ</h2>
-          <p style="font-size:8px;margin-top:12px;color:var(--muted);line-height:2">Хранитель лавки напишет<br>тебе в боте</p>
-        </div>`;
-      setTimeout(closeCart, 3500);
-    } else {
-      (tg?.showAlert ? tg.showAlert('Ошибка: '+(data.error||'')) : alert('Ошибка'));
-    }
-  }catch(e){
-    (tg?.showAlert ? tg.showAlert('Связь с лавкой прервалась') : alert('Связь с лавкой прервалась'));
   }
-}
-
-drawHero();
-drawStairs();
-loadProducts();
-window.addEventListener('resize', ()=>{ drawHero(); drawStairs(); });
 </script>
 </body>
 </html>
