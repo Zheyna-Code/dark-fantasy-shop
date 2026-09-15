@@ -78,7 +78,7 @@ class Store:
             await db.executescript("""
                 CREATE TABLE IF NOT EXISTS products (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
-                    description TEXT DEFAULT '', price INTEGER NOT NULL DEFAULT 0,
+                    description TEXT DEFAULT '', warranty TEXT DEFAULT '', price INTEGER NOT NULL DEFAULT 0,
                     category TEXT NOT NULL, emoji TEXT DEFAULT '', stock INTEGER DEFAULT 0,
                     active INTEGER NOT NULL DEFAULT 1, allow_preorder INTEGER NOT NULL DEFAULT 0
                 );
@@ -99,7 +99,11 @@ class Store:
                 );
             """)
             migrations = {
-                "products": {"active": "INTEGER NOT NULL DEFAULT 1", "allow_preorder": "INTEGER NOT NULL DEFAULT 0"},
+                "products": {
+                    "warranty": "TEXT DEFAULT ''",
+                    "active": "INTEGER NOT NULL DEFAULT 1",
+                    "allow_preorder": "INTEGER NOT NULL DEFAULT 0",
+                },
                 "orders": {"kind": "TEXT NOT NULL DEFAULT 'order'", "idempotency_key": "TEXT", "request_hash": "TEXT"},
             }
             for table, fields in migrations.items():
@@ -175,18 +179,19 @@ class Store:
 
     async def save_product(self, body, item_id=None):
         values = (text(body.get("name"), "Название", 200, True), text(body.get("description", ""), "Описание", 4000),
+                  text(body.get("warranty", ""), "Гарантия", 500),
                   integer(body.get("price", 0), "Цена"), text(body.get("category"), "Категория", 80, True),
                   integer(body.get("stock", 0), "Остаток", 10**6), flag(body.get("active", True), "Показывать"),
                   flag(body.get("allow_preorder", False), "Предзаказ"))
         async with self.connection() as db:
             await db.execute("BEGIN IMMEDIATE")
-            if not await (await db.execute("SELECT id FROM categories WHERE slug=?", (values[3],))).fetchone():
+            if not await (await db.execute("SELECT id FROM categories WHERE slug=?", (values[4],))).fetchone():
                 raise ApiError("Сначала создай категорию.")
             if item_id is None:
-                cursor = await db.execute("INSERT INTO products(name,description,price,category,stock,active,allow_preorder) VALUES(?,?,?,?,?,?,?)", values)
+                cursor = await db.execute("INSERT INTO products(name,description,warranty,price,category,stock,active,allow_preorder) VALUES(?,?,?,?,?,?,?,?)", values)
                 item_id = cursor.lastrowid
             else:
-                cursor = await db.execute("UPDATE products SET name=?,description=?,price=?,category=?,stock=?,active=?,allow_preorder=? WHERE id=?", (*values, item_id))
+                cursor = await db.execute("UPDATE products SET name=?,description=?,warranty=?,price=?,category=?,stock=?,active=?,allow_preorder=? WHERE id=?", (*values, item_id))
                 if not cursor.rowcount:
                     raise ApiError("Товар не найден.", 404)
             await db.commit()

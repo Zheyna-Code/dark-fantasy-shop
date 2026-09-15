@@ -130,8 +130,9 @@ def category_items(slug, catalog):
 def category_caption(slug, items):
     lines = [
         f"<b>Полка {CATEGORY_TITLES[slug]}</b>", "",
-        "Выбирай товар, путник: каждый артефакт помечен огнём наличия. "
-        "Зелёный — бери сразу, красный — полка пуста, срок поступления уточни у хранителя.", "",
+        "Выбирай товар, путник. Если артефакт закончился, можно оформить предзаказ — "
+        "хранитель сообщит срок поступления. Перед покупкой обязательно открой карточку: "
+        "там указаны цена, наличие и гарантия на товар.", "",
     ]
     shown = items[:12]
     if not shown:
@@ -140,15 +141,19 @@ def category_caption(slug, items):
         stock = item["stock"] if type(item["stock"]) is int else 0
         mark = "🟢" if stock > 0 else "🔴"
         state = f"в наличии: {stock}" if stock > 0 else "нет в наличии"
-        lines.append(f"{mark} <b>{escape(item['name'])}</b> — {item['price']:,} ₽ · {state}")
+        lines.append(f"{mark} <b>{escape(item['name'])}</b> — {state}; открой карточку кнопкой ниже")
     if len(items) > len(shown):
         lines.append(f"… и ещё {len(items) - len(shown)}: смотри мини-лавку.")
-    lines += ["", "Открой мини-лавку кнопкой «Лавка Странника» в меню, чтобы купить товар, или напиши хранителю."]
+    lines += ["", "Нажми на название товара ниже, чтобы открыть подробности."]
     return "\n".join(lines)
 
 
 def category_keyboard(user_id, slug, items, is_admin):
     rows = []
+    for item in items[:12]:
+        stock = item["stock"] if type(item["stock"]) is int else 0
+        mark = "🟢" if stock > 0 else "🔴"
+        rows.append([blue_button(f"{mark} {item['name'][:50]}", callback_data=f"product:{item['id']}")])
     if is_admin:
         for item in items[:20]:
             confirmed = (user_id, item["id"]) in pending_delete
@@ -156,6 +161,33 @@ def category_keyboard(user_id, slug, items, is_admin):
             rows.append([blue_button(label, callback_data=f"del:{item['id']}")])
         rows.append([blue_button("➕ Добавить товар", callback_data=f"add:{slug}")])
     rows.append([blue_button("Назад", callback_data="menu:products")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def product_caption(item):
+    stock = item["stock"] if type(item["stock"]) is int else 0
+    if stock > 0:
+        availability = f"🟢 В наличии: {stock}"
+    elif item.get("allow_preorder"):
+        availability = "🔴 Нет в наличии · доступен предзаказ"
+    else:
+        availability = "🔴 Нет в наличии"
+    description = escape(item.get("description") or "Описание уточняется у хранителя.")
+    warranty = escape(item.get("warranty") or "Уточняется у хранителя перед оплатой.")
+    price = f"{item['price']:,} ₽" if type(item.get("price")) is int and item["price"] > 0 else "Цена уточняется"
+    return (
+        f"<b>{escape(item['name'])}</b>\n\n"
+        f"{description}\n\n"
+        f"<b>Цена:</b> {price}\n"
+        f"<b>Наличие:</b> {availability}\n"
+        f"<b>Гарантия:</b> {warranty}\n\n"
+        "Внимательно проверь условия гарантии перед оформлением заявки."
+    )
+
+
+def product_keyboard(item):
+    rows = [[blue_button("Купить", callback_data=f"buy:{item['id']}")]]
+    rows.append([blue_button("Назад", callback_data=f"category:{item['category']}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -277,15 +309,25 @@ async def add_wizard(message: Message):
     else:
         state["data"]["description"] = "" if value.lower() in ("пропустить", "-", "без описания") else value[:4000]
         add_state.pop(user.id, None)
-        payload = {**state["data"], "category": state["slug"], "active": True, "allow_preorder": False}
+        payload = {
+            **state["data"],
+            "warranty": "",
+            "category": state["slug"],
+            "active": True,
+            "allow_preorder": True,
+        }
         try:
-            await store.save_product(payload)
+            saved = await store.save_product(payload)
         except ApiError as error:
             await message.answer(f"Не удалось сохранить товар: {error.message}")
             return
         await message.answer(
             f"<b>✅ Товар добавлен на полку</b>\n\n{escape(payload['name'])} — {payload['price']:,} ₽ · "
-            f"остаток: {payload['stock']}. Полка обновлена ниже.", parse_mode="HTML",
+            f"остаток: {payload['stock']}.\n\nНажми кнопку, чтобы открыть карточку товара и проверить гарантию.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                blue_button("Открыть карточку товара", callback_data=f"product:{saved['id']}")
+            ]]),
         )
         if state.get("message") is not None:
             await show_category(state["message"], user, state["slug"])
@@ -364,6 +406,35 @@ async def category_callback(callback: CallbackQuery):
     await show_category(callback.message, callback.from_user, slug)
 
 
+@dp.callback_query(F.data.startswith("product:"))
+async def product_callback(callback: CallbackQuery):
+    value = callback.data.split(":", 1)[1]
+    if not value.isdecimal() or len(value) > 19:
+        await callback.answer()
+        return
+    item = next((product for product in (await store.catalog())["products"] if product["id"] == int(value)), None)
+    if not item:
+        await callback.answer("Товар больше не найден.", show_alert=True)
+        return
+    await callback.answer()
+    markup = product_keyboard(item)
+    if callback.message.photo:
+        try:
+            await callback.message.edit_caption(caption=product_caption(item), parse_mode="HTML", reply_markup=markup)
+            return
+        except Exception as error:
+            log.warning("edit_caption failed, sending product details: %s", error)
+    await callback.message.answer(product_caption(item), parse_mode="HTML", reply_markup=markup)
+
+
+@dp.callback_query(F.data.startswith("buy:"))
+async def buy_callback(callback: CallbackQuery):
+    await callback.answer(
+        "Покупка пока не подключена. Оформи предзаказ или уточни условия у хранителя лавки.",
+        show_alert=True,
+    )
+
+
 @dp.callback_query(F.data.startswith("add:"))
 async def add_callback(callback: CallbackQuery):
     user = callback.from_user
@@ -436,7 +507,9 @@ async def main():
     runner = web.AppRunner(await make_app())
     await runner.setup()
     port = int(os.environ.get("PORT", "8080"))
-    host = os.environ.get("HOST", "127.0.0.1")
+    # Container platforms route traffic to the service through its network
+    # interface; binding only to localhost commonly results in 502 Bad Gateway.
+    host = os.environ.get("HOST", "0.0.0.0")
     try:
         await web.TCPSite(runner, host, port).start()
         log.info("Shop listening at %s:%s", host, port)

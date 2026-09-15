@@ -388,6 +388,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
           <legend id="product-form-title">Новый товар</legend>
           <label>Название варианта<input name="name" required maxlength="200" placeholder="ChatGPT 1M / ChatGPT 24h" autocomplete="off"></label>
           <label>Описание<textarea name="description" maxlength="4000"></textarea></label>
+          <label>Гарантия<input name="warranty" maxlength="500" placeholder="Например: 30 дней или уточняется у хранителя" autocomplete="off"></label>
           <label>Цена, целые рубли<input name="price" type="number" inputmode="numeric" min="0" max="9007199254740991" step="1" value="0" required></label>
           <label>Категория<select name="category" required></select></label>
           <label>Остаток<input name="stock" type="number" inputmode="numeric" min="0" max="9007199254740991" step="1" value="0" required></label>
@@ -644,7 +645,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
         top.append(image);
       }
       top.append(node("h2", "", product.name));
-      card.append(top, node("p", "card-description", product.description));
+      card.append(top, node("p", "card-description", product.description || "Описание уточняется у хранителя."));
+      card.append(node("p", "card-warranty", `Гарантия: ${product.warranty || "уточняется у хранителя"}`));
       card.append(node("p", "card-price", product.price > 0 ? money(product.price) : "Цена не задана"));
       const footer = node("div", "card-footer");
       footer.append(node("span", product.stock > 0 ? "in-stock" : "out-of-stock", stockText(product.stock)));
@@ -886,7 +888,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   function editProduct(product) {
     if (adminBusy || adminRequest || !isAdmin()) return;
     editingProduct = product.id;
-    ["name", "description", "price", "category", "stock"].forEach(key => { productForm.elements.namedItem(key).value = product[key] ?? (key === "price" || key === "stock" ? 0 : ""); });
+    ["name", "description", "warranty", "price", "category", "stock"].forEach(key => { productForm.elements.namedItem(key).value = product[key] ?? (key === "price" || key === "stock" ? 0 : ""); });
     productForm.elements.namedItem("active").checked = enabled(product.active);
     productForm.elements.namedItem("allow_preorder").checked = enabled(product.allow_preorder);
     $("product-form-title").textContent = "Изменить товар";
@@ -1022,7 +1024,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     const name = field("name").value.trim(), category = field("category").value;
     if (!name || !integer(price) || !integer(stock) || !adminCategories.some(item => item.slug === category)) { feedback("product-feedback", "Укажи название, категорию, целую неотрицательную цену и остаток.", true); return; }
     const creating = editingProduct === null;
-    const payload = { name, description: field("description").value.trim(), price, category, stock, active: creating ? true : field("active").checked, allow_preorder: field("allow_preorder").checked };
+    const payload = { name, description: field("description").value.trim(), warranty: field("warranty").value.trim(), price, category, stock, active: creating ? true : field("active").checked, allow_preorder: field("allow_preorder").checked };
     await saveAdmin(creating ? "/api/admin/products" : `/api/admin/products/${encodeURIComponent(editingProduct)}`, creating ? "POST" : "PATCH", payload, "product-feedback", resetProduct);
   });
   $("reset-category").addEventListener("click", () => { if (!adminBusy && !adminRequest) { resetCategory(); feedback("category-feedback"); } });
