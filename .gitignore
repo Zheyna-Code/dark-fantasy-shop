@@ -1,4 +1,12 @@
 __pycache__/
 *.pyc
-shop.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 .env
+.env.*
+!.env.example
+outputs/
+.workbuddy-ai/memory/
+.playwright-cli/

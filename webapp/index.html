@@ -213,11 +213,11 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #f8ce87; out
 body { height: var(--app-height, 100dvh); }
 .scroll-container {
   padding-top: calc(var(--safe-top) + var(--tg-content-safe-area-inset-top, 0px));
-  scroll-padding: 24px 0 calc(110px + var(--safe-bottom) + var(--tg-content-safe-area-inset-bottom, 0px));
+  scroll-padding: 24px 0 calc(24px + var(--safe-bottom) + var(--tg-content-safe-area-inset-bottom, 0px));
   padding-left: max(env(safe-area-inset-left, 0px), var(--tg-safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px));
   padding-right: max(env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px));
 }
-.wrap { padding-bottom: calc(96px + var(--safe-bottom) + var(--tg-content-safe-area-inset-bottom, 0px)); }
+.wrap { padding-bottom: calc(24px + var(--safe-bottom) + var(--tg-content-safe-area-inset-bottom, 0px)); }
 a { color: #f0c58f; touch-action: manipulation; }
 button, a, input, select, textarea { outline-offset: 3px; }
 :focus-visible { outline: 2px solid #f8ce87; }
@@ -256,11 +256,6 @@ button, .action { min-height: 44px; }
 .edge-nav { width: max(44px, calc((100% - var(--card-width)) / 2 - var(--gap))); }
 .pagination { flex-wrap: wrap; max-width: 100%; padding: 0 12px; }
 .pagination button { width: 44px; }
-.main-nav { position: fixed; z-index: 5; left: 0; right: 0; bottom: 0; border-top: 1px solid #735334; background: #17100df5; padding: 8px max(8px, env(safe-area-inset-left), var(--tg-safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px)) calc(8px + var(--safe-bottom) + var(--tg-content-safe-area-inset-bottom, 0px)); }
-.main-nav { padding-right: max(8px, env(safe-area-inset-right, 0px), var(--tg-safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px)); }
-.main-nav-inner { display: flex; justify-content: center; gap: 3px; max-width: 560px; margin: auto; }
-.main-nav button { flex: 1; min-width: 0; padding: 10px 3px; border: 1px solid transparent; background: transparent; color: #c5ad91; font: 12px/1.3 system-ui, sans-serif; }
-.main-nav button[aria-current="page"] { color: #ffe0b0; border-color: #89633d; background: #352418; }
 .page-panel { margin: 20px 16px; padding: 22px 18px; border: 1px solid #785634; background: linear-gradient(145deg, #32251cf5, #1c1612fa 60%, #271b13fc); box-shadow: inset 0 0 0 4px #18110d, inset 0 0 0 5px #503b28; overflow-wrap: anywhere; }
 .page-panel h1 { font-size: 28px; font-weight: normal; margin: 6px 0 20px; }
 .page-panel h2 { font-size: 21px; font-weight: normal; margin: 22px 0 12px; }
@@ -292,7 +287,6 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
 #order-dialog p { margin: 16px 0; font: 14px/1.65 system-ui, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 360px) {
   .product-card { padding: 22px 14px 17px; }
-  .main-nav button { font-size: 11px; }
   .page-panel { margin: 16px 10px; padding: 20px 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -304,9 +298,10 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
 <div class="fixed-bg" aria-hidden="true"></div>
 <main class="scroll-container" id="shop-scroll">
   <div class="wrap">
-    <div class="notice" id="session-notice" role="status">Проверяем вход через Telegram…</div>
+    <div class="notice" id="session-notice" role="status" hidden></div>
     <div class="notice" id="config-notice" hidden><p id="config-message" role="status"></p><button class="action" id="retry-config" type="button">Повторить загрузку настроек</button></div>
     <div class="notice" id="global-message" role="status" aria-live="polite"></div>
+    <div class="notice" id="admin-entry" hidden><button class="action" type="button" data-view="admin">Управление лавкой</button></div>
     <div id="view-catalog" data-page="catalog">
       <section class="hero" aria-label="Лавка Странника — выберите сервис">
         <div class="hero-fallback" id="hero-fallback"><h1>Лавка Странника</h1><p>Цифровые припасы для твоего пути.<br>Выбери сервис у прилавка.</p></div>
@@ -344,7 +339,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     </div>
     <section class="page-panel" id="view-profile" data-page="profile" aria-labelledby="profile-title" hidden>
       <p class="eyebrow">Летопись пути</p><h1 id="profile-title" tabindex="-1">Профиль странника</h1>
-      <img class="page-art" id="profile-image" src="/api/art/profile" alt="Профиль странника" width="1080" height="1080">
+      <img class="page-art" id="profile-image" src="/static/2.jpg" alt="Профиль странника" width="1080" height="1080">
       <p class="art-fallback" id="profile-fallback" hidden>Летопись странника — твоя история в лавке.</p>
       <p id="profile-login">Открой лавку через Telegram, чтобы увидеть свой профиль. В браузере доступен только просмотр каталога.</p>
       <dl class="stats" id="profile-stats" hidden></dl>
@@ -359,12 +354,13 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     </section>
     <section class="page-panel" id="view-support" data-page="support" aria-labelledby="support-title" hidden>
       <p class="eyebrow">Огонь у дороги</p><h1 id="support-title" tabindex="-1">Поддержка</h1>
-      <img class="page-art" id="support-image" src="/api/art/support" alt="У прилавка Лавки Странника" width="1080" height="1080">
+      <img class="page-art" id="support-image" src="/static/shop.jpg" alt="У прилавка Лавки Странника" width="1080" height="1080">
       <p class="art-fallback" id="support-fallback" hidden>Мы рядом, странник.</p>
       <p>Если сбился с пути или нужна помощь — обратись к нам.</p>
       <a class="action primary support-link" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer">@DitzzmBack</a>
     </section>
     <section class="page-panel" id="view-admin" data-page="admin" aria-labelledby="admin-title" hidden>
+      <button class="action" type="button" data-view="catalog">К каталогу</button>
       <p class="eyebrow">За прилавком</p><h1 id="admin-title" tabindex="-1">Управление лавкой</h1>
       <p>Настоящие товары и остатки. Сними отметку «Показывать», чтобы скрыть запись без удаления.</p>
       <button class="action" id="refresh-admin" type="button">Обновить данные</button>
@@ -406,15 +402,6 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     <noscript><p class="notice">Для загрузки товаров и работы с Telegram включи JavaScript.</p></noscript>
   </div>
 </main>
-<nav class="main-nav" aria-label="Основная навигация">
-  <div class="main-nav-inner">
-    <button type="button" data-view="catalog" aria-current="page" aria-controls="view-catalog">Каталог</button>
-    <button type="button" data-view="profile" aria-controls="view-profile">Профиль</button>
-    <button type="button" data-view="wallet" aria-controls="view-wallet">Кошелёк</button>
-    <button type="button" data-view="support" aria-controls="view-support">Поддержка</button>
-    <button type="button" id="admin-nav" data-view="admin" aria-controls="view-admin" hidden>Админ</button>
-  </div>
-</nav>
 <dialog id="order-dialog" aria-labelledby="order-title" aria-describedby="order-summary order-explanation">
   <h2 id="order-title">Подтверждение заказа</h2>
   <p id="order-summary"></p>
@@ -441,7 +428,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   const enabled = value => value === true || value === 1;
   const initData = () => window.Telegram?.WebApp?.initData || "";
   const isAdmin = () => Boolean(initData() && me?.is_admin === true);
-  let categories = [], products = [], selectedProvider = null, activeIndex = 0;
+  const requestedCategory = new URLSearchParams(location.search).get("category");
+  let categories = [], products = [], selectedProvider = providers.has(requestedCategory) ? requestedCategory : null, activeIndex = 0;
   let catalogReady = false, catalogLoaded = false, catalogRequest = null;
   let config = null, configRequest = null, me = null, meRequest = null;
   let sessionError = "", currentView = "catalog", initialViewApplied = false;
@@ -492,7 +480,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
           if (currentView === "admin") setView("catalog", false);
         }
         const detail = typeof data?.detail === "string" ? data.detail : typeof data?.error === "string" ? data.error : typeof data?.message === "string" ? data.message : "";
-        const error = new Error(detail || (response.status === 401 || response.status === 403 ? "Нет доступа. Обнови вход через Telegram." : `Сервер вернул ошибку ${response.status}. Повтори попытку.`));
+        const error = new Error(detail || (response.status === 404 ? "Лавка ещё не подключена к серверу. Владелец должен запустить app.py на хостинге и указать его HTTPS-адрес в WEBAPP_URL. GitHub Pages не запускает Python API." : response.status === 401 || response.status === 403 ? "Нет доступа. Обнови вход через Telegram." : `Сервер вернул ошибку ${response.status}. Повтори попытку.`));
         error.status = response.status;
         throw error;
       }
@@ -535,8 +523,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
         const username = typeof data.support_username === "string" && /^[A-Za-z0-9_]{5,32}$/.test(data.support_username) ? data.support_username : "DitzzmBack";
         document.querySelectorAll(".support-link").forEach(link => { link.href = "https://t.me/" + username; link.textContent = "@" + username; });
         setArt("hero-image", data.images?.menu, "/static/bg.jpg", "hero-fallback");
-        setArt("profile-image", data.images?.profile || "/api/art/profile", "/static/bg.jpg", "profile-fallback");
-        setArt("support-image", data.images?.support || "/api/art/support", "/static/bg.jpg", "support-fallback");
+        setArt("profile-image", data.images?.profile || "/static/2.jpg", "/static/bg.jpg", "profile-fallback");
+        setArt("support-image", data.images?.support || "/static/shop.jpg", "/static/bg.jpg", "support-fallback");
       } catch (error) {
         $("config-notice").hidden = false;
         feedback("config-message", message(error), true);
@@ -633,7 +621,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     $("empty-state").hidden = hasCards;
     $("empty-title").textContent = selectedProvider ? `Товары ${categoryName(selectedProvider)}` : "Что ищешь, странник?";
     $("empty-description").textContent = !catalogReady && !catalogLoaded
-      ? "Загрузи каталог, чтобы увидеть реальные товары и остатки."
+      ? "Пока не удалось получить товары из лавки."
       : selectedProvider ? "В этой категории пока нет доступных товаров. Загляни позже или обратись в поддержку."
       : products.length ? "Нажми на ChatGPT, Gemini или другую категорию, чтобы открыть товары." : "В лавке пока нет товаров. Новые варианты появятся здесь после добавления продавцом.";
     $("catalog-title").textContent = `Товары ${categoryName(selectedProvider)}`;
@@ -678,7 +666,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   function revealCatalog() {
     const target = catalog.hidden ? $("empty-state") : catalog;
     const bounds = target.getBoundingClientRect(), container = scroller.getBoundingClientRect();
-    const bottom = Math.min(container.bottom, document.querySelector(".main-nav").getBoundingClientRect().top) - 18;
+    const bottom = container.bottom - 18;
     if (bounds.bottom > bottom) {
       const available = bottom - container.top - 18;
       const delta = bounds.height <= available ? bounds.bottom - bottom : bounds.top - container.top - 18;
@@ -726,13 +714,13 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
 
   function renderSession() {
     const authenticated = Boolean(me && initData());
-    $("session-notice").hidden = authenticated;
+    $("session-notice").hidden = authenticated || !initData();
     $("session-notice").replaceChildren();
     if (!authenticated) {
       $("session-notice").append(node("p", "", initData() ? sessionError || "Проверяем вход через Telegram…" : "Ты вне Telegram: доступен только просмотр. Для профиля, кошелька и заказов открой лавку в Telegram."));
       if (initData() && sessionError) $("session-notice").append(button("Повторить вход", loadMe));
     }
-    $("admin-nav").hidden = !isAdmin();
+    $("admin-entry").hidden = !isAdmin();
     $("profile-login").hidden = authenticated;
     $("profile-login").textContent = initData() ? sessionError || "Проверяем профиль…" : "Открой лавку через Telegram, чтобы увидеть свой профиль. В браузере доступен только просмотр каталога.";
     $("profile-stats").hidden = !authenticated;
@@ -1091,8 +1079,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     } catch { /* Browsing remains available without Telegram bridge features. */ }
     syncViewport();
     setArt("hero-image", "/static/bg.jpg", "/static/bg.jpg", "hero-fallback");
-    setArt("profile-image", "/api/art/profile", "/static/bg.jpg", "profile-fallback");
-    setArt("support-image", "/api/art/support", "/static/bg.jpg", "support-fallback");
+    setArt("profile-image", "/static/2.jpg", "/static/bg.jpg", "profile-fallback");
+    setArt("support-image", "/static/shop.jpg", "/static/bg.jpg", "support-fallback");
     renderSession(); renderCategories();
     loadConfig(); loadCatalog(); loadMe();
     if (!initData()) {

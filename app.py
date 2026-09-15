@@ -1,204 +1,266 @@
-"""
-Лавка Странника — Telegram Dark Fantasy Shop
-Бот + Web App API (aiogram 3 + aiohttp + SQLite)
-"""
+"""Лавка Странника: Telegram photo menu, mini app and authenticated admin API."""
 import asyncio
-import json
 import logging
 import os
-import time
-import hashlib
-import hmac
-from urllib.parse import parse_qsl
+import re
+from html import escape
+from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-import aiosqlite
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart
-from aiogram.types import Message, WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command, CommandStart
+from aiogram.types import (
+    BotCommand, CallbackQuery, FSInputFile, InlineKeyboardButton,
+    InlineKeyboardMarkup, MenuButtonCommands, Message, WebAppInfo,
+)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "PASTE_YOUR_TOKEN_HERE")
-WEBAPP_URL = os.environ.get("WEBAPP_URL", "http://localhost:8080")  # в проде: https URL
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shop.db")
+from shop_backend import Store, register_api
 
+BASE_DIR = Path(__file__).resolve().parent
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")
+DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "shop.db"))
+SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "DitzzmBack").lstrip("@")
+if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
+    raise ValueError("SUPPORT_USERNAME must be a Telegram username without a URL")
+
+
+def parse_admin_ids(value):
+    parts = value.replace(" ", "").split(",")
+    if any(part and (not part.isdecimal() or not 0 < int(part) < 2**63) for part in parts):
+        raise ValueError("ADMIN_IDS must contain numeric Telegram user IDs separated by commas")
+    return {int(part) for part in parts if part}
+
+
+ADMIN_IDS = parse_admin_ids(os.environ.get("ADMIN_IDS", ""))
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("lavka")
-
-bot = Bot(BOT_TOKEN)
+store = Store(DB_PATH)
 dp = Dispatcher()
+# Web App buttons and personal information must only appear in private chats.
+dp.message.filter(F.chat.type == "private")
+dp.callback_query.filter(F.message.chat.type == "private")
 
-# ---------- База данных ----------
+MENU_CAPTION = (
+    "<b>Добро пожаловать в Лавку Странника!</b>\n\n"
+    "Спасибо, что пользуешься нашей лавкой, путник. "
+    "Отдохни у старого дуба: здесь начинается твой путь в мир нейросетей.\n\n"
+    "Выбирай, куда отправиться: к товарам, в свой профиль, к кошельку "
+    "или за помощью к хранителю лавки."
+)
+SHOP_CAPTION = (
+    "<b>Ты попал в Лавку Странника</b>\n\n"
+    "За каменными стенами мерцают магические артефакты нового века — нейросети. "
+    "В нашей лавке ты найдёшь цифровых помощников для идей, работы и творчества.\n\n"
+    "Выбери свою магию: <b>ChatGPT</b> или <b>Gemini</b>."
+)
 
-INIT_SQL = """
-CREATE TABLE IF NOT EXISTS products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT,
-    price INTEGER NOT NULL,          -- цена в золотых монетах
-    category TEXT DEFAULT 'relics',
-    emoji TEXT DEFAULT '🕯️',
-    stock INTEGER DEFAULT 99
-);
-CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    items TEXT NOT NULL,             -- JSON [{id, name, price, qty}]
-    total INTEGER NOT NULL,
-    comment TEXT DEFAULT '',
-    status TEXT DEFAULT 'new',       -- new / paid / done
-    created_at INTEGER NOT NULL
-);
-"""
 
-SEED_PRODUCTS = [
-    ("Свеча «Шёпот Таверны»", "Воск, тёплый янтарный свет, аромат дыма и мёда. Горит 40 часов.", 120, "candles", "🕯️", 20),
-    ("Свеча «Северный Дозор»", "Чёрный воск, запах хвои и холодного камня.", 150, "candles", "🕯️", 15),
-    ("Эликсир Бодрости", "Зелье алхимика: кофеин, женьшень и капля безумия. 250 мл.", 90, "potions", "⚗️", 30),
-    ("Эликсир Спокойного Сна", "Лаванда и валериана. Выпей — и даже виверна не разбудит.", 110, "potions", "🧪", 25),
-    ("Свиток Древнего Знания", "Пергамент ручной работы с гравировкой. Для записей и заклинаний.", 200, "relics", "📜", 10),
-    ("Кулон «Око Ворона»", "Обсидиан на кожаном шнурке. Говорят, приносит везение.", 340, "relics", "🖤", 8),
-    ("Травяной сбор «Лесная Ведьма»", "Чабрец, шиповник, мята. Завари на ночь.", 70, "potions", "🌿", 40),
-    ("Кубок Путника", "Деревянный кубок с резьбой. Для мёда, вина и историй у костра.", 260, "relics", "🏆", 12),
-]
+def blue_button(label, **action):
+    return InlineKeyboardButton(text=label, style="primary", **action)
 
-async def init_db():
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.executescript(INIT_SQL)
-        cur = await db.execute("SELECT COUNT(*) FROM products")
-        (count,) = await cur.fetchone()
-        if count == 0:
-            await db.executemany(
-                "INSERT INTO products (name, description, price, category, emoji, stock) VALUES (?,?,?,?,?,?)",
-                SEED_PRODUCTS,
-            )
-            log.info("Каталог засеян: %d товаров", len(SEED_PRODUCTS))
-        await db.commit()
 
-# ---------- Проверка подписи Telegram Web App ----------
+def menu_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button("🛒 Товары", callback_data="menu:products")],
+        [blue_button("👤 Профиль", callback_data="menu:profile")],
+        [blue_button("💰 Кошелёк", callback_data="menu:wallet")],
+        [blue_button("🛟 Техподдержка", callback_data="menu:support")],
+    ])
 
-def check_init_data(init_data: str) -> dict | None:
-    """Верификация initData по алгоритму Telegram (HMAC-SHA256)."""
-    try:
-        pairs = dict(parse_qsl(init_data, strict_parsing=True))
-    except ValueError:
+
+def back_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[blue_button("В меню", callback_data="menu:home")]])
+
+
+def webapp_url(**params):
+    url = urlsplit(WEBAPP_URL)
+    if url.scheme != "https" or not url.netloc or url.username or url.password:
         return None
-    recv_hash = pairs.pop("hash", None)
-    if not recv_hash:
-        return None
-    data_check = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
-    secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
-    calc = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(calc, recv_hash):
-        return None
-    user = json.loads(pairs.get("user", "{}"))
-    return {"user_id": user.get("id"), "user": user}
+    query = dict(parse_qsl(url.query))
+    query.update(params)
+    return urlunsplit((url.scheme, url.netloc, url.path or "/", urlencode(query), ""))
 
-# ---------- HTTP API для Web App ----------
 
-async def handle_products(request: web.Request) -> web.Response:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM products WHERE stock > 0 ORDER BY category, price")
-        rows = await cur.fetchall()
-    products = [dict(r) for r in rows]
-    return web.json_response(products, headers={"Access-Control-Allow-Origin": "*"})
+def categories_keyboard():
+    buttons = []
+    for slug, title in (("chatgpt", "ChatGPT"), ("gemini", "Gemini")):
+        url = webapp_url(category=slug)
+        action = {"web_app": WebAppInfo(url=url)} if url else {"callback_data": "category:" + slug}
+        buttons.append(blue_button(title, **action))
+    return InlineKeyboardMarkup(inline_keyboard=[buttons, [blue_button("В меню", callback_data="menu:home")]])
 
-async def handle_order(request: web.Request) -> web.Response:
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return web.json_response({"ok": False, "error": "bad json"}, status=400)
 
-    auth = check_init_data(body.get("initData", ""))
-    if not auth or not auth.get("user_id"):
-        return web.json_response({"ok": False, "error": "auth failed"}, status=403)
+async def send_photo(message, filename, caption, reply_markup):
+    path = BASE_DIR / "webapp" / filename
+    if path.is_file():
+        await message.answer_photo(FSInputFile(path), caption=caption, parse_mode="HTML", reply_markup=reply_markup)
+    else:
+        # Keep navigation usable if a deployment accidentally omits a photo.
+        log.error("Missing bot photo: %s", filename)
+        await message.answer(caption, parse_mode="HTML", reply_markup=reply_markup)
 
-    cart = body.get("cart", [])
-    if not cart:
-        return web.json_response({"ok": False, "error": "cart empty"}, status=400)
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        items, total = [], 0
-        for entry in cart:
-            cur = await db.execute("SELECT * FROM products WHERE id = ? AND stock > 0", (entry["id"],))
-            row = await cur.fetchone()
-            if not row:
-                continue
-            qty = max(1, min(int(entry.get("qty", 1)), row["stock"]))
-            items.append({"id": row["id"], "name": row["name"], "price": row["price"], "qty": qty})
-            total += row["price"] * qty
-            await db.execute("UPDATE products SET stock = stock - ? WHERE id = ?", (qty, row["id"]))
-        if not items:
-            return web.json_response({"ok": False, "error": "items unavailable"}, status=400)
-        cur = await db.execute(
-            "INSERT INTO orders (user_id, items, total, comment, created_at) VALUES (?,?,?,?,?)",
-            (auth["user_id"], json.dumps(items, ensure_ascii=False), total, body.get("comment", "")[:300], int(time.time())),
-        )
-        await db.commit()
-        order_id = cur.lastrowid
+async def send_menu(message, user):
+    await store.profile(user.model_dump(), user.id in ADMIN_IDS)
+    await send_photo(message, "1.jpg", MENU_CAPTION, menu_keyboard())
 
-    # Уведомление пользователю
-    lines = "\n".join(f"  {i['qty']}× {i['name']} — {i['price']} 🪙" for i in items)
-    text = (
-        f"🕯️ <b>Заказ №{order_id} принят в Лавке Странника</b>\n\n"
-        f"{lines}\n\n"
-        f"Итог: <b>{total} золотых</b>\n"
-        f"Хранитель лавки свяжется с тобой в ближайшее время. Жди у очага. 🖤"
-    )
-    try:
-        await bot.send_message(auth["user_id"], text, parse_mode="HTML")
-    except Exception as e:
-        log.warning("Не удалось отправить уведомление: %s", e)
-
-    return web.json_response({"ok": True, "order_id": order_id, "total": total})
-
-# ---------- Статика Web App ----------
-
-async def handle_index(request: web.Request) -> web.Response:
-    here = os.path.dirname(os.path.abspath(__file__))
-    return web.FileResponse(os.path.join(here, "webapp", "index.html"))
-
-async def make_app() -> web.Application:
-    app = web.Application()
-    app.router.add_get("/", handle_index)
-    app.router.add_static("/static", os.path.join(os.path.dirname(os.path.abspath(__file__)), "webapp"))
-    app.router.add_get("/api/products", handle_products)
-    app.router.add_post("/api/order", handle_order)
-    app.router.add_route("OPTIONS", "/api/order", lambda r: web.Response(headers={
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-    }))
-    return app
-
-# ---------- Бот ----------
 
 @dp.message(CommandStart())
-async def cmd_start(m: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🕯️ Войти в Лавку", web_app=WebAppInfo(url=WEBAPP_URL))
-    ]])
-    await m.answer(
-        "🖤 <b>Добро пожаловать в Лавку Странника</b>\n\n"
-        "Ты переступил порог, где мерцают свечи, а полки хранят "
-        "зелья, свитки и реликвии из дальних земель.\n\n"
-        "Присаживайся у очага. Нажми кнопку ниже — и лавка откроется.",
-        parse_mode="HTML",
-        reply_markup=kb,
+@dp.message(Command("menu"))
+async def cmd_menu(message: Message):
+    await send_menu(message, message.from_user)
+
+
+@dp.message(Command("id"))
+async def cmd_id(message: Message):
+    await message.answer(f"Твой Telegram ID: <code>{message.from_user.id}</code>", parse_mode="HTML")
+
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: Message):
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer(
+            "У тебя пока нет доступа к управлению лавкой.\n\n"
+            f"Твой Telegram ID: <code>{user_id}</code>\n"
+            "Если ты владелец бота, добавь этот ID в ADMIN_IDS в переменных окружения "
+            "на хостинге, перезапусти приложение и снова отправь /admin. "
+            "Для нескольких администраторов перечисли ID через запятую.\n\n"
+            "Не отправляй токен бота в чат и не добавляй его в GitHub.", parse_mode="HTML",
+        )
+        return
+    url = webapp_url(view="admin")
+    if not url:
+        await message.answer(
+            "Права администратора подтверждены. Для открытия панели укажи WEBAPP_URL — "
+            "публичный HTTPS-адрес этого приложения на хостинге — и перезапусти приложение. "
+            "Адрес GitHub-репозитория или GitHub Pages не подходит: нужен запущенный Python-сервер."
+        )
+        return
+    await message.answer(
+        "<b>Управление Лавкой Странника</b>\n\n"
+        "Здесь можно добавлять товары, менять цены и остатки, а также отмечать оплату и выдачу заказов. "
+        "Нажми кнопку ниже. Доступ проверяется по твоему Telegram ID на сервере.",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            blue_button("Открыть админку", web_app=WebAppInfo(url=url))
+        ]]),
     )
 
-# ---------- Запуск ----------
+
+@dp.callback_query(F.data.startswith("menu:"))
+async def menu_callback(callback: CallbackQuery):
+    await callback.answer()
+    message, user = callback.message, callback.from_user
+    action = callback.data.split(":", 1)[1]
+    if action == "home":
+        await send_menu(message, user)
+    elif action == "products":
+        await store.profile(user.model_dump(), user.id in ADMIN_IDS)
+        await send_photo(message, "shop.jpg", SHOP_CAPTION, categories_keyboard())
+    elif action == "profile":
+        profile = await store.profile(user.model_dump(), user.id in ADMIN_IDS)
+        caption = (
+            "<b>Привет, путник!</b>\n\n"
+            "Вот что хранит летопись твоих странствий:\n\n"
+            f"Куплено товаров: <b>{profile['purchases']}</b>\n"
+            f"Потрачено: <b>{profile['spent']:,} ₽</b>\n"
+            f"Твой номер в лавке: <b>№{profile['traveler_no']}</b>\n"
+            f"Любимый товар: <b>{escape(profile['favorite_product'] or 'Пока нет покупок')}</b>\n\n"
+            "В летопись попадают только оплаченные покупки."
+        )
+        await send_photo(message, "2.jpg", caption, back_keyboard())
+    elif action == "wallet":
+        profile = await store.profile(user.model_dump(), user.id in ADMIN_IDS)
+        await message.answer(
+            f"<b>Кошелёк странника</b>\n\nБаланс: <b>{profile['balance']:,} ₽</b>\n\n"
+            "Пополнение пока не подключено. Оплату и получение товара согласуй с поддержкой; "
+            "нажатие кнопок не списывает деньги.", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [blue_button("🛟 Техподдержка", url=f"https://t.me/{SUPPORT_USERNAME}")],
+                [blue_button("В меню", callback_data="menu:home")],
+            ]),
+        )
+    elif action == "support":
+        await message.answer(
+            "<b>Хранитель лавки на связи</b>\n\n"
+            "Нужна помощь с выбором нейросети, оплатой или покупкой? "
+            "Напиши нам — поможем найти верный путь.", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [blue_button("🛟 Написать в поддержку", url=f"https://t.me/{SUPPORT_USERNAME}")],
+                [blue_button("В меню", callback_data="menu:home")],
+            ]),
+        )
+
+
+@dp.callback_query(F.data.startswith("category:"))
+async def category_callback(callback: CallbackQuery):
+    """Usable fallback when the shop's public HTTPS URL is not yet configured."""
+    await callback.answer()
+    slug = callback.data.split(":", 1)[1]
+    if slug not in ("chatgpt", "gemini"):
+        return
+    title = "ChatGPT" if slug == "chatgpt" else "Gemini"
+    catalog = await store.catalog()
+    items = [item for item in catalog["products"] if item["category"] == slug]
+    lines = [f"<b>Товары {title}</b>"]
+    if not items:
+        lines.append("Полка пока пуста. Новые товары появятся после добавления продавцом.")
+    else:
+        for item in items[:10]:
+            lines.append(f"{escape(item['name'])} — {item['price']} ₽ · в наличии: {item['stock']}")
+        if len(items) > 10:
+            lines.append("Остальные варианты уточни у поддержки.")
+    lines.append("Для покупки или уточнения наличия напиши хранителю лавки.")
+    await callback.message.answer("\n\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button("🛟 Техподдержка", url=f"https://t.me/{SUPPORT_USERNAME}")],
+        [blue_button("К категориям", callback_data="menu:products")],
+    ]))
+
+
+async def make_app():
+    application = web.Application(client_max_size=64 * 1024)
+    register_api(application, store, BOT_TOKEN, ADMIN_IDS, SUPPORT_USERNAME)
+
+    async def index(request):
+        return web.FileResponse(BASE_DIR / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})
+
+    async def health(request):
+        return web.json_response({"ok": True})
+
+    application.router.add_get("/", index)
+    application.router.add_get("/health", health)
+    application.router.add_static("/static", BASE_DIR / "webapp", show_index=False)
+    return application
+
 
 async def main():
-    await init_db()
-    app = await make_app()
-    runner = web.AppRunner(app)
+    web_only = os.environ.get("WEB_ONLY", "").lower() in ("1", "true", "yes")
+    if not web_only and not BOT_TOKEN:
+        raise SystemExit("Set BOT_TOKEN on the hosting service. For a local catalog preview use WEB_ONLY=1.")
+    await store.init_db()
+    runner = web.AppRunner(await make_app())
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
-    await site.start()
-    log.info("Web App слушает на порту %s", os.environ.get("PORT", 8080))
-    await dp.start_polling(bot)
+    port = int(os.environ.get("PORT", "8080"))
+    host = os.environ.get("HOST", "127.0.0.1")
+    try:
+        await web.TCPSite(runner, host, port).start()
+        log.info("Shop listening at %s:%s", host, port)
+        if web_only:
+            await asyncio.Event().wait()
+        else:
+            async with Bot(BOT_TOKEN) as bot:
+                await bot.set_my_commands([
+                    BotCommand(command="menu", description="Открыть меню лавки"),
+                    BotCommand(command="admin", description="Управление лавкой"),
+                    BotCommand(command="id", description="Узнать свой Telegram ID"),
+                ])
+                await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+                await dp.start_polling(bot, close_bot_session=False)
+    finally:
+        await runner.cleanup()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
