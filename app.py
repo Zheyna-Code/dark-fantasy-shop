@@ -62,10 +62,11 @@ CATEGORY_TITLES = {"chatgpt": "ChatGPT", "gemini": "Gemini"}
 CATEGORY_PHOTOS = {"chatgpt": "chatgptshop.jpg", "gemini": "geminishop.jpg"}
 ADD_STEPS = ("name", "price", "stock", "description")
 ADD_PROMPTS = {
-    "name": "Шаг 1 из 4. Отправь название товара одной строкой (до 200 символов).",
-    "price": "Шаг 2 из 4. Отправь цену целыми рублями (например, 590).",
-    "stock": "Шаг 3 из 4. Отправь остаток целым числом (0 — товара нет в наличии).",
-    "description": "Шаг 4 из 4. Отправь описание товара или слово «пропустить».",
+    "type": "Шаг 1 из 5. Это тестовый товар? Тестовый покупают тестеры без оплаты — чтобы проверить автовыдачу.",
+    "name": "Шаг 2 из 5. Отправь название товара одной строкой (до 200 символов).",
+    "price": "Шаг 3 из 5. Отправь цену целыми рублями (например, 590).",
+    "stock": "Шаг 4 из 5. Отправь остаток целым числом (0 — товара нет в наличии; для предзаказа включается в карточке мини-лавки).",
+    "description": "Шаг 5 из 5. Отправь описание товара или слово «пропустить».",
 }
 UPLOAD_PROMPT = (
     "<b>📤 Загрузка автовыдачи: {name}</b>\n\n"
@@ -87,6 +88,15 @@ last_shelf = {}
 
 def blue_button(label, **action):
     return InlineKeyboardButton(text=label, style="primary", **action)
+
+
+def styled_button(label, style, **action):
+    return InlineKeyboardButton(text=label, style=style, **action)
+
+
+def plain_button(label, **action):
+    """Кнопка без цвета — например, предзаказ."""
+    return InlineKeyboardButton(text=label, **action)
 
 
 def webapp_url(**params):
@@ -115,12 +125,13 @@ def back_keyboard():
 
 
 def cancel_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[[blue_button("Отмена", callback_data="upload:cancel")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[styled_button("Отмена", "danger", callback_data="upload:cancel")]])
 
 
 def categories_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button(title, callback_data="category:" + slug) for slug, title in CATEGORY_TITLES.items()],
+        [plain_button("⏳ Предзаказы", callback_data="preorders")],
         [blue_button("В меню", callback_data="menu:home")],
     ])
 
@@ -147,26 +158,13 @@ def category_items(slug, catalog):
 def category_caption(slug, items):
     lines = [
         f"<b>Полка {CATEGORY_TITLES[slug]}</b>", "",
-        "Выбирай товар, путник. Если артефакт закончился, можно оформить предзаказ "
-        "с предоплатой 100% — при поступлении бот сначала выдаст предзаказы по очереди, "
-        "и только потом остаток попадёт на полку. Перед покупкой обязательно открой карточку: "
-        "там указаны цена, наличие и гарантия на товар.", "",
+        "Выбирай товар, путник: <b>зелёная</b> кнопка — товар в наличии, <b>красная</b> — кончился. "
+        "Если в карточке доступен предзаказ, его можно оформить с предоплатой 100% — "
+        "при поступлении бот выдаст предзаказы первыми, раньше полки.", "",
+        "Перед покупкой обязательно открой карточку: там указаны цена, наличие и гарантия.",
     ]
-    shown = items[:12]
-    if not shown:
-        lines.append("🔴 Полка пуста: хранитель лавки ещё не выложил артефакты.")
-    for item in shown:
-        stock = item["stock"] if type(item["stock"]) is int else 0
-        if item.get("is_test"):
-            mark, state = "🧪", f"тестовых единиц: {stock}"
-        elif stock > 0:
-            mark, state = "🟢", f"в наличии: {stock}"
-        else:
-            mark, state = "🔴", "нет в наличии"
-        lines.append(f"{mark} <b>{escape(item['name'])}</b> — {state}; открой карточку кнопкой ниже")
-    if len(items) > len(shown):
-        lines.append(f"… и ещё {len(items) - len(shown)}: смотри мини-лавку.")
-    lines += ["", "Нажми на название товара ниже, чтобы открыть подробности."]
+    if not items:
+        lines.append("\n🔴 Полка пуста: хранитель лавки ещё не выложил артефакты.")
     return "\n".join(lines)
 
 
@@ -174,18 +172,17 @@ def category_keyboard(user_id, slug, items, is_admin):
     rows = []
     for item in items[:12]:
         stock = item["stock"] if type(item["stock"]) is int else 0
-        if item.get("is_test"):
-            mark = "🧪"
-        else:
-            mark = "🟢" if stock > 0 else "🔴"
-        rows.append([blue_button(f"{mark} {item['name'][:50]}", callback_data=f"product:{item['id']}")])
+        prefix = "🧪 " if item.get("is_test") else ""
+        # Кнопка товара горит зелёным при наличии и красным, когда товара нет.
+        style = "success" if stock > 0 else "danger"
+        rows.append([styled_button(f"{prefix}{item['name'][:50]}", style, callback_data=f"product:{item['id']}")])
     if is_admin:
         for item in items[:20]:
             confirmed = (user_id, item["id"]) in pending_delete
             label = ("⚠️ Точно удалить: " if confirmed else "🗑 Удалить: ") + item["name"][:38]
             rows.append([blue_button(label, callback_data=f"del:{item['id']}")])
         rows.append([blue_button("➕ Добавить товар", callback_data=f"add:{slug}")])
-    rows.append([blue_button("Назад", callback_data="menu:products")])
+    rows.append([styled_button("Назад", "danger", callback_data="menu:products")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -219,14 +216,15 @@ def product_keyboard(item, can_test=False, is_admin=False):
     rows = []
     if item.get("is_test"):
         if stock > 0 and can_test:
-            rows.append([blue_button("🧪 Тестовая покупка без оплаты", callback_data=f"buy:{item['id']}")])
+            rows.append([styled_button("🧪 Тестовая покупка без оплаты", "success", callback_data=f"buy:{item['id']}")])
     elif stock > 0:
-        rows.append([blue_button("Купить", callback_data=f"buy:{item['id']}")])
+        rows.append([styled_button("Купить", "success", callback_data=f"buy:{item['id']}")])
     elif item.get("allow_preorder"):
-        rows.append([blue_button("⏳ Предзаказ · предоплата 100%", callback_data=f"preorder:{item['id']}")])
+        # Предзаказ — без цвета: он не покупка, а заявка на поступление.
+        rows.append([plain_button("⏳ Предзаказ · предоплата 100%", callback_data=f"preorder:{item['id']}")])
     if is_admin:
         rows.append([blue_button("📤 Загрузить автовыдачу", callback_data=f"upload:{item['id']}")])
-    rows.append([blue_button("Назад", callback_data=f"category:{item['category']}")])
+    rows.append([styled_button("Назад", "danger", callback_data=f"category:{item['category']}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -255,18 +253,50 @@ def add_prompt_caption(state):
     return f"<b>➕ Новый товар {title}</b>\n\n{ADD_PROMPTS[state['step']]}\n\nОтмена — кнопка ниже или команда /cancel."
 
 
-def add_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[[blue_button("Отмена", callback_data="add:cancel")]])
+def add_keyboard(step=None):
+    if step == "type":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [
+                styled_button("🧪 Тестовый товар", "success", callback_data="addtype:test"),
+                blue_button("📦 Обычный товар", callback_data="addtype:regular"),
+            ],
+            [styled_button("Отмена", "danger", callback_data="add:cancel")],
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=[[styled_button("Отмена", "danger", callback_data="add:cancel")]])
 
 
 async def prompt_add(message, state):
+    text = add_prompt_caption(state)
+    markup = add_keyboard(state["step"])
     if message.photo:
         try:
-            await message.edit_caption(caption=add_prompt_caption(state), parse_mode="HTML", reply_markup=add_keyboard())
+            await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=markup)
             return
         except Exception as error:
             log.warning("edit_caption failed, sending a new prompt: %s", error)
-    await message.answer(add_prompt_caption(state), parse_mode="HTML", reply_markup=add_keyboard())
+    await message.answer(text, parse_mode="HTML", reply_markup=markup)
+
+
+@dp.message(Command("add"))
+async def cmd_add(message: Message):
+    """Быстрое добавление товара: сразу выбор категории, потом мастер."""
+    user = message.from_user
+    if user.id not in ADMIN_IDS:
+        await message.answer("Добавлять товары может только хранитель лавки.")
+        return
+    add_state.pop(user.id, None)
+    upload_state.pop(user.id, None)
+    catalog = await store.catalog(admin=True)
+    rows = [
+        [blue_button(CATEGORY_TITLES.get(category["slug"], category["name"])[:50], callback_data=f"add:{category['slug']}")]
+        for category in catalog["categories"] if category.get("active")
+    ] or [[blue_button("ChatGPT", callback_data="add:chatgpt")], [blue_button("Gemini", callback_data="add:gemini")]]
+    rows.append([styled_button("Отмена", "danger", callback_data="add:cancel")])
+    await message.answer(
+        "<b>➕ Добавление товара</b>\n\nШаг 1. Выбери категорию полки — "
+        "потом выбери тип товара и заполни карточку.",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
 
 
 @dp.message(CommandStart())
@@ -335,6 +365,9 @@ async def add_wizard(message: Message):
         return
     value = (message.text or "").strip()
     step = state["step"]
+    if step == "type":
+        await message.answer("Сначала выбери тип товара кнопками выше: 🧪 тестовый или 📦 обычный.")
+        return
     if step == "name":
         if not value or len(value) > 200:
             await message.answer("Название: от 1 до 200 символов. Повтори ввод.")
@@ -353,21 +386,25 @@ async def add_wizard(message: Message):
     else:
         state["data"]["description"] = "" if value.lower() in ("пропустить", "-", "без описания") else value[:4000]
         add_state.pop(user.id, None)
+        is_test = bool(state["data"].get("is_test"))
         payload = {
             **state["data"],
             "warranty": "",
             "category": state["slug"],
             "active": True,
-            "allow_preorder": True,
+            "is_test": is_test,
+            "allow_preorder": not is_test,
         }
         try:
             saved = await store.save_product(payload)
         except ApiError as error:
             await message.answer(f"Не удалось сохранить товар: {error.message}")
             return
+        kind_line = "🧪 Тестовый товар: тестеры смогут проверить автовыдачу без оплаты." if is_test else \
+            "Когда появятся единицы, не забудь загрузить автовыдачу в карточке товара."
         await message.answer(
             f"<b>✅ Товар добавлен на полку</b>\n\n{escape(payload['name'])} — {payload['price']:,} ₽ · "
-            f"остаток: {payload['stock']}.\n\nНажми кнопку, чтобы открыть карточку товара и проверить гарантию.",
+            f"остаток: {payload['stock']}.\n\n{kind_line}\nОткрой карточку и проверь, как она выглядит.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                 blue_button("Открыть карточку товара", callback_data=f"product:{saved['id']}")
@@ -518,6 +555,33 @@ async def category_callback(callback: CallbackQuery):
     await show_category(callback.message, callback.from_user, slug)
 
 
+@dp.callback_query(F.data == "preorders")
+async def preorders_callback(callback: CallbackQuery):
+    """Отдельная полка: все товары, которые можно заказать с предоплатой 100%."""
+    await callback.answer()
+    add_state.pop(callback.from_user.id, None)
+    upload_state.pop(callback.from_user.id, None)
+    catalog = await store.catalog()
+    items = [
+        product for product in catalog["products"]
+        if product.get("allow_preorder") and not product.get("is_test")
+        and (product["stock"] if type(product["stock"]) is int else 0) == 0
+    ]
+    lines = [
+        "<b>⏳ Полка предзаказов</b>", "",
+        "Эти товары скоро появятся в лавке. Предзаказ действует по <b>предоплате 100%</b>: "
+        "внеси полную сумму хранителю, и при поступлении бот выдаст оплаченные предзаказы "
+        "первыми — раньше, чем остаток попадёт на полку.", "",
+    ]
+    if not items:
+        lines.append("Сейчас предзаказ оформить нельзя: все товары либо в наличии, либо без предзаказа.")
+    rows = [[styled_button(item["name"][:50], "danger", callback_data=f"product:{item['id']}")] for item in items[:12]]
+    if len(items) > 12:
+        lines.append(f"… и ещё {len(items) - 12}: смотри мини-лавку.")
+    rows.append([styled_button("Назад", "danger", callback_data="menu:products")])
+    await send_photo(callback.message, "shop.jpg", "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows))
+
+
 @dp.callback_query(F.data.startswith("product:"))
 async def product_callback(callback: CallbackQuery):
     value = callback.data.split(":", 1)[1]
@@ -648,9 +712,26 @@ async def add_callback(callback: CallbackQuery):
         return
     add_state.pop(user.id, None)
     upload_state.pop(user.id, None)
-    add_state[user.id] = {"slug": slug, "step": ADD_STEPS[0], "data": {}, "message": callback.message}
+    add_state[user.id] = {"slug": slug, "step": "type", "data": {}, "message": callback.message}
     await callback.answer()
     await prompt_add(callback.message, add_state[user.id])
+
+
+@dp.callback_query(F.data.startswith("addtype:"))
+async def addtype_callback(callback: CallbackQuery):
+    """Выбор типа нового товара: тестовый или обычный."""
+    user = callback.from_user
+    if user.id not in ADMIN_IDS:
+        await callback.answer("Добавлять товары может только хранитель лавки.", show_alert=True)
+        return
+    state = add_state.get(user.id)
+    if not state or state["step"] != "type":
+        await callback.answer()
+        return
+    state["data"]["is_test"] = callback.data == "addtype:test"
+    state["step"] = "name"
+    await callback.answer()
+    await prompt_add(state["message"], state)
 
 
 @dp.callback_query(F.data.startswith("del:"))
@@ -741,6 +822,7 @@ async def main():
                 await bot.set_my_commands([
                     BotCommand(command="menu", description="Открыть меню лавки"),
                     BotCommand(command="admin", description="Управление лавкой"),
+                    BotCommand(command="add", description="Добавить товар (для владельца)"),
                     BotCommand(command="id", description="Узнать свой Telegram ID"),
                     BotCommand(command="cancel", description="Отменить добавление товара"),
                 ])

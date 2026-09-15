@@ -226,21 +226,24 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(view["ready_samples"][:1], ["two"])
 
     async def test_bot_product_buttons_preorder_and_test(self):
+        def styles(markup):
+            return {(button.text, button.model_dump(exclude_none=True).get("style")) for row in markup.inline_keyboard for button in row}
         test_id = await self.product(stock=2, is_test=True)
         item = await self.store.product(test_id)
-        texts = [button.text for row in shop.product_keyboard(item, can_test=True).inline_keyboard for button in row]
-        self.assertIn("🧪 Тестовая покупка без оплаты", texts)
-        self.assertNotIn("Купить", texts)
-        texts = [button.text for row in shop.product_keyboard(item, can_test=False).inline_keyboard for button in row]
-        self.assertFalse(any("Тестовая покупка" in text for text in texts))
+        pairs = styles(shop.product_keyboard(item, can_test=True))
+        self.assertIn(("🧪 Тестовая покупка без оплаты", "success"), pairs)
+        self.assertNotIn(("Купить", "success"), pairs)
+        pairs = styles(shop.product_keyboard(item, can_test=False))
+        self.assertFalse(any("Тестовая покупка" in text for text, _ in pairs))
         plain_id = await self.product(stock=0, allow_preorder=True)
         item = await self.store.product(plain_id)
-        texts = [button.text for row in shop.product_keyboard(item).inline_keyboard for button in row]
-        self.assertTrue(any("Предзаказ" in text and "предоплата 100%" in text for text in texts))
+        pairs = styles(shop.product_keyboard(item))
+        self.assertIn(("⏳ Предзаказ · предоплата 100%", None), pairs)  # предзаказ без цвета
         stocked_id = await self.product(stock=1)
         item = await self.store.product(stocked_id)
-        texts = [button.text for row in shop.product_keyboard(item).inline_keyboard for button in row]
-        self.assertIn("Купить", texts)
+        pairs = styles(shop.product_keyboard(item, can_test=False, is_admin=True))
+        self.assertIn(("Купить", "success"), pairs)
+        self.assertIn(("Назад", "danger"), pairs)
 
     async def test_bot_test_purchase_sends_payload_to_chat(self):
         test_id = await self.product(stock=1, is_test=True)
@@ -442,21 +445,45 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(str(message.answer_photo.call_args.args[0].path).endswith("chatgptshop.jpg"))
         caption = message.answer_photo.call_args.kwargs["caption"]
         self.assertIn("Полка ChatGPT", caption)
-        self.assertIn("🟢", caption)
-        self.assertIn("ChatGPT 1M", caption)
+        self.assertIn("зелёная", caption)
+        self.assertNotIn("ChatGPT 1M", caption)  # товары не перечисляются текстом — только кнопками
         rows = message.answer_photo.call_args.kwargs["reply_markup"].inline_keyboard
+        product_button = next(button for row in rows for button in row if button.callback_data == "product:1")
+        self.assertEqual(product_button.text, "ChatGPT 1M")
+        self.assertEqual(product_button.model_dump(exclude_none=True)["style"], "success")  # есть в наличии — зелёная
         self.assertEqual(rows[-1][0].text, "Назад")
-        self.assertEqual(rows[-1][0].callback_data, "menu:products")
+        self.assertEqual((rows[-1][0].callback_data, rows[-1][0].model_dump(exclude_none=True)["style"]), ("menu:products", "danger"))
         self.assertFalse(any(button.callback_data.startswith("add:") for row in rows for button in row))
         gemini = AsyncMock()
         gemini.photo = None
         callback = AsyncMock()
         callback.message, callback.from_user, callback.data = gemini, user, "category:gemini"
         await shop.category_callback(callback)
-        gemini_caption = gemini.answer_photo.call_args.kwargs["caption"]
-        self.assertIn("🔴", gemini_caption)
-        self.assertIn("нет в наличии", gemini_caption)
+        rows = gemini.answer_photo.call_args.kwargs["reply_markup"].inline_keyboard
+        product_button = next(button for row in rows for button in row if button.callback_data == "product:2")
+        self.assertEqual(product_button.model_dump(exclude_none=True)["style"], "danger")  # нет в наличии — красная
         self.assertTrue(str(gemini.answer_photo.call_args.args[0].path).endswith("geminishop.jpg"))
+
+    async def test_preorder_shelf_and_categories_button(self):
+        plain_id = await self.product(stock=0, allow_preorder=True)
+        await self.product(stock=1)  # в наличии — на полку предзаказов не попадает
+        keyboard = shop.categories_keyboard().inline_keyboard
+        preorders_button = next(button for row in keyboard for button in row if button.callback_data == "preorders")
+        self.assertEqual(preorders_button.text, "⏳ Предзаказы")
+        self.assertNotIn("style", preorders_button.model_dump(exclude_none=True))  # предзаказ без цвета
+        user = User(id=USER, is_bot=False, first_name="Tester")
+        shelf = AsyncMock()
+        shelf.photo = None
+        callback = AsyncMock()
+        callback.message, callback.from_user, callback.data = shelf, user, "preorders"
+        await shop.preorders_callback(callback)
+        caption = shelf.answer_photo.call_args.kwargs["caption"]
+        self.assertIn("Полка предзаказов", caption)
+        self.assertIn("предоплате 100%", caption)
+        rows = shelf.answer_photo.call_args.kwargs["reply_markup"].inline_keyboard
+        product_button = next(button for row in rows for button in row if button.callback_data == f"product:{plain_id}")
+        self.assertEqual(product_button.model_dump(exclude_none=True)["style"], "danger")
+        self.assertEqual(rows[-1][0].callback_data, "menu:products")
 
     async def test_admin_shelf_add_wizard_and_two_step_delete(self):
         product_id = await self.product(stock=1)
@@ -474,6 +501,10 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         callback = AsyncMock()
         callback.message, callback.from_user, callback.data = message, user, "add:chatgpt"
         await shop.add_callback(callback)
+        self.assertEqual(shop.add_state[ADMIN]["step"], "type")
+        type_callback = AsyncMock()
+        type_callback.message, type_callback.from_user, type_callback.data = message, user, "addtype:regular"
+        await shop.addtype_callback(type_callback)
         self.assertEqual(shop.add_state[ADMIN]["step"], "name")
         for text, step in (("ChatGPT Plus", "name"), ("790", "price"), ("3", "stock"), ("пропустить", "description")):
             self.assertEqual(shop.add_state[ADMIN]["step"], step)
@@ -507,6 +538,14 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         bad.from_user = user
         bad.text = ""
         await shop.add_wizard(bad)
+        self.assertEqual(shop.add_state[ADMIN]["step"], "type")  # текст не двигает шаг выбора типа
+        type_callback = AsyncMock()
+        type_callback.message, type_callback.from_user, type_callback.data = message, user, "addtype:regular"
+        await shop.addtype_callback(type_callback)
+        bad = AsyncMock()
+        bad.from_user = user
+        bad.text = ""
+        await shop.add_wizard(bad)
         self.assertEqual(shop.add_state[ADMIN]["step"], "name")
         bad.text = "12.5"
         shop.add_state[ADMIN]["step"] = "price"
@@ -516,6 +555,45 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         cancel.from_user = user
         await shop.cmd_cancel(cancel)
         self.assertNotIn(ADMIN, shop.add_state)
+        shop.add_state.clear()
+
+    async def test_add_command_creates_test_and_regular_products(self):
+        admin = User(id=ADMIN, is_bot=False, first_name="Owner")
+        message = AsyncMock()
+        message.from_user = admin
+        await shop.cmd_add(message)
+        self.assertIn("категорию", message.answer.call_args.args[0])
+        rows = message.answer.call_args.kwargs["reply_markup"].inline_keyboard
+        codes = [button.callback_data for row in rows for button in row]
+        self.assertIn("add:chatgpt", codes)
+        self.assertIn("add:gemini", codes)
+        cancel_button = rows[-1][0]
+        self.assertEqual((cancel_button.callback_data, cancel_button.model_dump(exclude_none=True)["style"]), ("add:cancel", "danger"))
+        stranger = AsyncMock()
+        stranger.from_user = User(id=USER, is_bot=False, first_name="Stranger")
+        await shop.cmd_add(stranger)
+        self.assertIn("хранитель", stranger.answer.call_args.args[0])
+        # Тестовый товар: создаётся визардом после выбора 🧪 Тестовый.
+        board = AsyncMock()
+        board.photo = None
+        callback = AsyncMock()
+        callback.message, callback.from_user, callback.data = board, admin, "add:gemini"
+        await shop.add_callback(callback)
+        self.assertEqual(shop.add_state[ADMIN]["step"], "type")
+        self.assertEqual(shop.add_state[ADMIN]["data"], {})
+        type_callback = AsyncMock()
+        type_callback.message, type_callback.from_user, type_callback.data = board, admin, "addtype:test"
+        await shop.addtype_callback(type_callback)
+        self.assertEqual(shop.add_state[ADMIN]["step"], "name")
+        for text in ("Test Widget", "100", "4", "тест"):
+            wizard_message = AsyncMock()
+            wizard_message.from_user = admin
+            wizard_message.text = text
+            await shop.add_wizard(wizard_message)
+        self.assertNotIn(ADMIN, shop.add_state)
+        added = [item for item in (await self.store.catalog(include_test=True))["products"] if item["name"] == "Test Widget"]
+        self.assertEqual((added[0]["is_test"], added[0]["allow_preorder"]), (1, 0))
+        self.assertEqual((await self.store.catalog())["products"], [])  # обычным покупателям его не видно
         shop.add_state.clear()
 
     async def test_delete_product_api(self):

@@ -7,6 +7,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.venv/
 outputs/
-.workbuddy-ai/memory/
+.workbuddy-ai/
 .playwright-cli/
+_check.js
