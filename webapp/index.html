@@ -146,8 +146,8 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #f8ce87; out
   padding: 22px 21px 17px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: stretch;
+  text-align: left;
   border: 1px solid #6a4c30;
   background: linear-gradient(145deg, #32251cf5, #1c1612fa 60%, #271b13fc);
   box-shadow: inset 0 0 0 4px #18110d, inset 0 0 0 5px #503b28, 0 10px 16px #09060466;
@@ -168,9 +168,12 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #f8ce87; out
 .product-card::before { left: 10px; top: 10px; }
 .product-card::after { right: 10px; bottom: 10px; }
 .card-kicker { font: 9px/1.4 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .18em; color: #c2a47e; }
+.card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin: 14px 0 4px; }
+.card-top .card-icon { width: 46px; height: 46px; margin: 0; flex: 0 0 46px; }
+.card-top h2 { flex: 1; margin: 0; text-align: right; font-size: clamp(18px, 4.6vw, 23px); }
 .card-icon { width: 62px; height: 62px; margin: 16px 0 14px; image-rendering: pixelated; filter: drop-shadow(0 4px 6px #0008); }
 .product-card h2 { font-size: clamp(22px, 5vw, 27px); font-weight: normal; line-height: 1.2; margin-bottom: 10px; }
-.card-description { max-width: 235px; color: #bfad96; font: 12px/1.65 system-ui, sans-serif; }
+.card-description { max-width: none; margin-top: 10px; color: #bfad96; font: 12px/1.65 system-ui, sans-serif; }
 .card-footer { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 17px; font: 9px/1.4 system-ui, sans-serif; letter-spacing: .12em; color: #cda775; }
 .card-footer span:first-child { text-align: left; }
 .edge-nav {
@@ -632,14 +635,16 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       card.setAttribute("aria-roledescription", "карточка товара");
       card.setAttribute("aria-label", `${product.name}, ${index + 1} из ${items.length}`);
       card.append(node("p", "card-kicker", `Лавка Странника / ${categoryName(selectedProvider)}`));
+      const top = node("div", "card-top");
       const provider = providers.get(selectedProvider);
       if (provider) {
         const image = node("img", "card-icon");
-        image.src = provider.icon; image.alt = ""; image.width = 62; image.height = 62; image.draggable = false;
+        image.src = provider.icon; image.alt = categoryName(selectedProvider); image.width = 46; image.height = 46; image.draggable = false;
         image.addEventListener("error", () => { image.hidden = true; }, { once: true });
-        card.append(image);
+        top.append(image);
       }
-      card.append(node("h2", "", product.name), node("p", "card-description", product.description));
+      top.append(node("h2", "", product.name));
+      card.append(top, node("p", "card-description", product.description));
       card.append(node("p", "card-price", product.price > 0 ? money(product.price) : "Цена не задана"));
       const footer = node("div", "card-footer");
       footer.append(node("span", product.stock > 0 ? "in-stock" : "out-of-stock", stockText(product.stock)));
@@ -888,6 +893,11 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     feedback("product-feedback"); syncAdminControls();
     productForm.elements.namedItem("name").focus();
   }
+  async function deleteProduct(product) {
+    if (!isAdmin() || adminBusy || adminRequest || !adminReady) return;
+    if (!window.confirm(`Удалить товар «${product.name}» без возможности восстановления?`)) return;
+    await saveAdmin(`/api/admin/products/${encodeURIComponent(product.id)}`, "DELETE", undefined, "product-feedback");
+  }
   function renderAdminCatalog() {
     $("admin-categories").replaceChildren(); $("admin-products").replaceChildren();
     if (!adminCategories.length) $("admin-categories").append(node("p", "", "Категорий пока нет. Создай первую ниже."));
@@ -907,7 +917,9 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     if (!adminProducts.length) $("admin-products").append(node("p", "", "Товаров пока нет. Добавь реальные варианты ниже."));
     adminProducts.forEach(product => {
       const row = node("article", "admin-row");
-      row.append(node("h3", "", product.name), node("p", "", `${product.category} · ${integer(product.price) && product.price > 0 ? money(product.price) : "Цена не задана"} · Остаток: ${integer(product.stock) ? product.stock : 0} · ${enabled(product.active) ? "Показывается" : "Скрыт"}${enabled(product.allow_preorder) ? " · Предзаказ разрешён" : ""}`), button("Изменить товар", () => editProduct(product)));
+      const controls = node("div", "form-actions");
+      controls.append(button("Изменить товар", () => editProduct(product)), button("Удалить товар", () => deleteProduct(product)));
+      row.append(node("h3", "", product.name), node("p", "", `${product.category} · ${integer(product.price) && product.price > 0 ? money(product.price) : "Цена не задана"} · Остаток: ${integer(product.stock) ? product.stock : 0} · ${enabled(product.active) ? "Показывается" : "Скрыт"}${enabled(product.allow_preorder) ? " · Предзаказ разрешён" : ""}`), controls);
       $("admin-products").append(row);
     });
   }

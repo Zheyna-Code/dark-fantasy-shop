@@ -12,10 +12,10 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     BotCommand, CallbackQuery, FSInputFile, InlineKeyboardButton,
-    InlineKeyboardMarkup, MenuButtonCommands, Message, WebAppInfo,
+    InlineKeyboardMarkup, InputMediaPhoto, MenuButtonCommands, Message, WebAppInfo,
 )
 
-from shop_backend import Store, register_api
+from shop_backend import ApiError, Store, register_api
 
 BASE_DIR = Path(__file__).resolve().parent
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
@@ -46,8 +46,8 @@ MENU_CAPTION = (
     "<b>Добро пожаловать в Лавку Странника!</b>\n\n"
     "Спасибо, что пользуешься нашей лавкой, путник. "
     "Отдохни у старого дуба: здесь начинается твой путь в мир нейросетей.\n\n"
-    "Выбирай, куда отправиться: к товарам, в свой профиль, к кошельку "
-    "или за помощью к хранителю лавки."
+    "Выбирай, куда отправиться: к товарам, в мини-лавку, в свой профиль, "
+    "к кошельку или за помощью к хранителю лавки."
 )
 SHOP_CAPTION = (
     "<b>Ты попал в Лавку Странника</b>\n\n"
@@ -55,23 +55,25 @@ SHOP_CAPTION = (
     "В нашей лавке ты найдёшь цифровых помощников для идей, работы и творчества.\n\n"
     "Выбери свою магию: <b>ChatGPT</b> или <b>Gemini</b>."
 )
+CATEGORY_TITLES = {"chatgpt": "ChatGPT", "gemini": "Gemini"}
+CATEGORY_PHOTOS = {"chatgpt": "chatgptshop.jpg", "gemini": "geminishop.jpg"}
+ADD_STEPS = ("name", "price", "stock", "description")
+ADD_PROMPTS = {
+    "name": "Шаг 1 из 4. Отправь название товара одной строкой (до 200 символов).",
+    "price": "Шаг 2 из 4. Отправь цену целыми рублями (например, 590).",
+    "stock": "Шаг 3 из 4. Отправь остаток целым числом (0 — товара нет в наличии).",
+    "description": "Шаг 4 из 4. Отправь описание товара или слово «пропустить».",
+}
+# Conversational product wizard: user_id -> {"slug", "step", "data", "message"}.
+add_state = {}
+# Two-step delete confirmation: set of (user_id, product_id).
+pending_delete = set()
+# Last opened photo shelf per user, used to refresh it after add/delete.
+last_shelf = {}
 
 
 def blue_button(label, **action):
     return InlineKeyboardButton(text=label, style="primary", **action)
-
-
-def menu_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [blue_button("🛒 Товары", callback_data="menu:products")],
-        [blue_button("👤 Профиль", callback_data="menu:profile")],
-        [blue_button("💰 Кошелёк", callback_data="menu:wallet")],
-        [blue_button("🛟 Техподдержка", callback_data="menu:support")],
-    ])
-
-
-def back_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[[blue_button("В меню", callback_data="menu:home")]])
 
 
 def webapp_url(**params):
@@ -83,13 +85,27 @@ def webapp_url(**params):
     return urlunsplit((url.scheme, url.netloc, url.path or "/", urlencode(query), ""))
 
 
+def menu_keyboard():
+    url = webapp_url()
+    shop_action = {"web_app": WebAppInfo(url=url)} if url else {"callback_data": "menu:shop"}
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button("🛒 Товары", callback_data="menu:products")],
+        [blue_button("🏪 Лавка Странника", **shop_action)],
+        [blue_button("👤 Профиль", callback_data="menu:profile")],
+        [blue_button("💰 Кошелёк", callback_data="menu:wallet")],
+        [blue_button("🛟 Техподдержка", callback_data="menu:support")],
+    ])
+
+
+def back_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[blue_button("В меню", callback_data="menu:home")]])
+
+
 def categories_keyboard():
-    buttons = []
-    for slug, title in (("chatgpt", "ChatGPT"), ("gemini", "Gemini")):
-        url = webapp_url(category=slug)
-        action = {"web_app": WebAppInfo(url=url)} if url else {"callback_data": "category:" + slug}
-        buttons.append(blue_button(title, **action))
-    return InlineKeyboardMarkup(inline_keyboard=[buttons, [blue_button("В меню", callback_data="menu:home")]])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button(title, callback_data="category:" + slug) for slug, title in CATEGORY_TITLES.items()],
+        [blue_button("В меню", callback_data="menu:home")],
+    ])
 
 
 async def send_photo(message, filename, caption, reply_markup):
@@ -107,6 +123,80 @@ async def send_menu(message, user):
     await send_photo(message, "1.jpg", MENU_CAPTION, menu_keyboard())
 
 
+def category_items(slug, catalog):
+    return [item for item in catalog["products"] if item["category"] == slug]
+
+
+def category_caption(slug, items):
+    lines = [
+        f"<b>Полка {CATEGORY_TITLES[slug]}</b>", "",
+        "Выбирай товар, путник: каждый артефакт помечен огнём наличия. "
+        "Зелёный — бери сразу, красный — полка пуста, срок поступления уточни у хранителя.", "",
+    ]
+    shown = items[:12]
+    if not shown:
+        lines.append("🔴 Полка пуста: хранитель лавки ещё не выложил артефакты.")
+    for item in shown:
+        stock = item["stock"] if type(item["stock"]) is int else 0
+        mark = "🟢" if stock > 0 else "🔴"
+        state = f"в наличии: {stock}" if stock > 0 else "нет в наличии"
+        lines.append(f"{mark} <b>{escape(item['name'])}</b> — {item['price']:,} ₽ · {state}")
+    if len(items) > len(shown):
+        lines.append(f"… и ещё {len(items) - len(shown)}: смотри мини-лавку.")
+    lines += ["", "Открой мини-лавку кнопкой «Лавка Странника» в меню, чтобы купить товар, или напиши хранителю."]
+    return "\n".join(lines)
+
+
+def category_keyboard(user_id, slug, items, is_admin):
+    rows = []
+    if is_admin:
+        for item in items[:20]:
+            confirmed = (user_id, item["id"]) in pending_delete
+            label = ("⚠️ Точно удалить: " if confirmed else "🗑 Удалить: ") + item["name"][:38]
+            rows.append([blue_button(label, callback_data=f"del:{item['id']}")])
+        rows.append([blue_button("➕ Добавить товар", callback_data=f"add:{slug}")])
+    rows.append([blue_button("Назад", callback_data="menu:products")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def show_category(message, user, slug):
+    last_shelf[user.id] = slug
+    catalog = await store.catalog()
+    items = category_items(slug, catalog)
+    caption = category_caption(slug, items)
+    markup = category_keyboard(user.id, slug, items, user.id in ADMIN_IDS)
+    path = BASE_DIR / "webapp" / CATEGORY_PHOTOS[slug]
+    if message.photo:
+        try:
+            await message.edit_media(
+                media=InputMediaPhoto(media=FSInputFile(path), caption=caption, parse_mode="HTML"),
+                reply_markup=markup,
+            )
+            return
+        except Exception as error:
+            log.warning("edit_media failed, sending a new photo: %s", error)
+    await send_photo(message, CATEGORY_PHOTOS[slug], caption, markup)
+
+
+def add_prompt_caption(state):
+    title = CATEGORY_TITLES[state["slug"]]
+    return f"<b>➕ Новый товар {title}</b>\n\n{ADD_PROMPTS[state['step']]}\n\nОтмена — кнопка ниже или команда /cancel."
+
+
+def add_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[blue_button("Отмена", callback_data="add:cancel")]])
+
+
+async def prompt_add(message, state):
+    if message.photo:
+        try:
+            await message.edit_caption(caption=add_prompt_caption(state), parse_mode="HTML", reply_markup=add_keyboard())
+            return
+        except Exception as error:
+            log.warning("edit_caption failed, sending a new prompt: %s", error)
+    await message.answer(add_prompt_caption(state), parse_mode="HTML", reply_markup=add_keyboard())
+
+
 @dp.message(CommandStart())
 @dp.message(Command("menu"))
 async def cmd_menu(message: Message):
@@ -116,6 +206,17 @@ async def cmd_menu(message: Message):
 @dp.message(Command("id"))
 async def cmd_id(message: Message):
     await message.answer(f"Твой Telegram ID: <code>{message.from_user.id}</code>", parse_mode="HTML")
+
+
+@dp.message(Command("cancel"))
+async def cmd_cancel(message: Message):
+    state = add_state.pop(message.from_user.id, None)
+    if not state:
+        await message.answer("Активных действий нет. Продолжай путь, путник.")
+        return
+    await message.answer("Добавление товара отменено.")
+    if state.get("message") is not None and state["slug"] in CATEGORY_PHOTOS:
+        await show_category(state["message"], message.from_user, state["slug"])
 
 
 @dp.message(Command("admin"))
@@ -141,7 +242,8 @@ async def cmd_admin(message: Message):
         return
     await message.answer(
         "<b>Управление Лавкой Странника</b>\n\n"
-        "Здесь можно добавлять товары, менять цены и остатки, а также отмечать оплату и выдачу заказов. "
+        "Здесь можно добавлять товары, менять цены и остатки, удалять карточки, "
+        "а также отмечать оплату и выдачу заказов. "
         "Нажми кнопку ниже. Доступ проверяется по твоему Telegram ID на сервере.",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             blue_button("Открыть админку", web_app=WebAppInfo(url=url))
@@ -149,13 +251,70 @@ async def cmd_admin(message: Message):
     )
 
 
+@dp.message(F.text, ~F.text.startswith("/"), lambda message: message.from_user.id in add_state)
+async def add_wizard(message: Message):
+    user = message.from_user
+    state = add_state.get(user.id)
+    if not state:
+        return
+    value = (message.text or "").strip()
+    step = state["step"]
+    if step == "name":
+        if not value or len(value) > 200:
+            await message.answer("Название: от 1 до 200 символов. Повтори ввод.")
+            return
+        state["data"]["name"] = value
+    elif step == "price":
+        if not value.isdecimal() or int(value) > 2**31:
+            await message.answer("Цена: целое неотрицательное число рублей. Повтори ввод.")
+            return
+        state["data"]["price"] = int(value)
+    elif step == "stock":
+        if not value.isdecimal() or int(value) > 10**6:
+            await message.answer("Остаток: целое неотрицательное число. Повтори ввод.")
+            return
+        state["data"]["stock"] = int(value)
+    else:
+        state["data"]["description"] = "" if value.lower() in ("пропустить", "-", "без описания") else value[:4000]
+        add_state.pop(user.id, None)
+        payload = {**state["data"], "category": state["slug"], "active": True, "allow_preorder": False}
+        try:
+            await store.save_product(payload)
+        except ApiError as error:
+            await message.answer(f"Не удалось сохранить товар: {error.message}")
+            return
+        await message.answer(
+            f"<b>✅ Товар добавлен на полку</b>\n\n{escape(payload['name'])} — {payload['price']:,} ₽ · "
+            f"остаток: {payload['stock']}. Полка обновлена ниже.", parse_mode="HTML",
+        )
+        if state.get("message") is not None:
+            await show_category(state["message"], user, state["slug"])
+        return
+    state["step"] = ADD_STEPS[ADD_STEPS.index(step) + 1]
+    await prompt_add(state["message"], state)
+
+
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_callback(callback: CallbackQuery):
     await callback.answer()
     message, user = callback.message, callback.from_user
     action = callback.data.split(":", 1)[1]
+    if action in ("home", "products", "shop"):
+        add_state.pop(user.id, None)
     if action == "home":
         await send_menu(message, user)
+    elif action == "shop":
+        url = webapp_url()
+        if url:
+            await message.answer(
+                "Мини-лавка открывается кнопкой «Лавка Странника» в меню.", parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [blue_button("🏪 Лавка Странника", web_app=WebAppInfo(url=url))],
+                    [blue_button("В меню", callback_data="menu:home")],
+                ]),
+            )
+        else:
+            await send_photo(message, "shop.jpg", SHOP_CAPTION, categories_keyboard())
     elif action == "products":
         await store.profile(user.model_dump(), user.id in ADMIN_IDS)
         await send_photo(message, "shop.jpg", SHOP_CAPTION, categories_keyboard())
@@ -196,27 +355,61 @@ async def menu_callback(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("category:"))
 async def category_callback(callback: CallbackQuery):
-    """Usable fallback when the shop's public HTTPS URL is not yet configured."""
+    """Photo shelf: picture, traveler caption, stock list and admin tools."""
     await callback.answer()
     slug = callback.data.split(":", 1)[1]
-    if slug not in ("chatgpt", "gemini"):
+    if slug not in CATEGORY_PHOTOS:
         return
-    title = "ChatGPT" if slug == "chatgpt" else "Gemini"
-    catalog = await store.catalog()
-    items = [item for item in catalog["products"] if item["category"] == slug]
-    lines = [f"<b>Товары {title}</b>"]
-    if not items:
-        lines.append("Полка пока пуста. Новые товары появятся после добавления продавцом.")
+    add_state.pop(callback.from_user.id, None)
+    await show_category(callback.message, callback.from_user, slug)
+
+
+@dp.callback_query(F.data.startswith("add:"))
+async def add_callback(callback: CallbackQuery):
+    user = callback.from_user
+    slug = callback.data.split(":", 1)[1]
+    if slug == "cancel":
+        state = add_state.pop(user.id, None)
+        await callback.answer()
+        if state and state["slug"] in CATEGORY_PHOTOS and state.get("message") is not None:
+            await show_category(state["message"], user, state["slug"])
+        return
+    if user.id not in ADMIN_IDS:
+        await callback.answer("Добавлять товары может только хранитель лавки.", show_alert=True)
+        return
+    if slug not in CATEGORY_PHOTOS:
+        return
+    add_state[user.id] = {"slug": slug, "step": ADD_STEPS[0], "data": {}, "message": callback.message}
+    await callback.answer()
+    await prompt_add(callback.message, add_state[user.id])
+
+
+@dp.callback_query(F.data.startswith("del:"))
+async def delete_callback(callback: CallbackQuery):
+    user = callback.from_user
+    if user.id not in ADMIN_IDS:
+        await callback.answer("Удалять товары может только хранитель лавки.", show_alert=True)
+        return
+    value = callback.data.split(":", 1)[1]
+    if not value.isdecimal() or len(value) > 19:
+        return
+    product_id = int(value)
+    key = (user.id, product_id)
+    if key not in pending_delete:
+        for other in [item for item in pending_delete if item[0] == user.id]:
+            pending_delete.discard(other)
+        pending_delete.add(key)
+        await callback.answer("Нажми ещё раз, чтобы подтвердить удаление.")
     else:
-        for item in items[:10]:
-            lines.append(f"{escape(item['name'])} — {item['price']} ₽ · в наличии: {item['stock']}")
-        if len(items) > 10:
-            lines.append("Остальные варианты уточни у поддержки.")
-    lines.append("Для покупки или уточнения наличия напиши хранителю лавки.")
-    await callback.message.answer("\n\n".join(lines), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-        [blue_button("🛟 Техподдержка", url=f"https://t.me/{SUPPORT_USERNAME}")],
-        [blue_button("К категориям", callback_data="menu:products")],
-    ]))
+        pending_delete.discard(key)
+        try:
+            await store.delete_product(product_id)
+            await callback.answer("Товар удалён с полки.")
+        except ApiError as error:
+            await callback.answer(error.message, show_alert=True)
+    slug = last_shelf.get(user.id)
+    if slug in CATEGORY_PHOTOS:
+        await show_category(callback.message, user, slug)
 
 
 async def make_app():
@@ -255,6 +448,7 @@ async def main():
                     BotCommand(command="menu", description="Открыть меню лавки"),
                     BotCommand(command="admin", description="Управление лавкой"),
                     BotCommand(command="id", description="Узнать свой Telegram ID"),
+                    BotCommand(command="cancel", description="Отменить добавление товара"),
                 ])
                 await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
                 await dp.start_polling(bot, close_bot_session=False)

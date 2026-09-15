@@ -185,16 +185,18 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_menu_keyboards_and_photo_files(self):
         menu = shop.menu_keyboard().model_dump(exclude_none=True)
-        self.assertEqual(len(menu["inline_keyboard"]), 4)
+        self.assertEqual(len(menu["inline_keyboard"]), 5)
         for row in menu["inline_keyboard"]:
             self.assertEqual(row[0]["style"], "primary")
+        self.assertEqual(menu["inline_keyboard"][1][0]["text"], "🏪 Лавка Странника")
+        self.assertIn("web_app", menu["inline_keyboard"][1][0])
         categories = shop.categories_keyboard().inline_keyboard[0]
         self.assertEqual([button.text for button in categories], ["ChatGPT", "Gemini"])
-        self.assertIn("category=chatgpt", categories[0].web_app.url)
-        self.assertTrue(all(button.icon_custom_emoji_id is None for button in categories))
+        self.assertEqual([button.callback_data for button in categories], ["category:chatgpt", "category:gemini"])
+        self.assertTrue(all(button.web_app is None for button in categories))
         with patch.object(shop, "WEBAPP_URL", ""):
-            self.assertEqual(shop.categories_keyboard().inline_keyboard[0][0].callback_data, "category:chatgpt")
-        for image in ("1.jpg", "shop.jpg", "2.jpg"):
+            self.assertEqual(shop.menu_keyboard().inline_keyboard[1][0].callback_data, "menu:shop")
+        for image in ("1.jpg", "shop.jpg", "2.jpg", "chatgptshop.jpg", "geminishop.jpg"):
             self.assertTrue((shop.BASE_DIR / "webapp" / image).is_file())
 
     async def test_menu_products_profile_handlers(self):
@@ -248,6 +250,104 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(ids, [USER])
         finally:
             await bot.session.close()
+
+    async def test_category_shelf_photo_and_stock_marks(self):
+        await self.product(stock=2, price=590)
+        await self.store.save_product({"name": "Gemini Pro", "category": "gemini", "price": 400, "stock": 0})
+        user = User(id=USER, is_bot=False, first_name="Tester")
+        message = AsyncMock()
+        message.photo = None
+        callback = AsyncMock()
+        callback.message, callback.from_user, callback.data = message, user, "category:chatgpt"
+        await shop.category_callback(callback)
+        callback.answer.assert_awaited_once()
+        self.assertTrue(str(message.answer_photo.call_args.args[0].path).endswith("chatgptshop.jpg"))
+        caption = message.answer_photo.call_args.kwargs["caption"]
+        self.assertIn("Полка ChatGPT", caption)
+        self.assertIn("🟢", caption)
+        self.assertIn("ChatGPT 1M", caption)
+        rows = message.answer_photo.call_args.kwargs["reply_markup"].inline_keyboard
+        self.assertEqual(rows[-1][0].text, "Назад")
+        self.assertEqual(rows[-1][0].callback_data, "menu:products")
+        self.assertFalse(any(button.callback_data.startswith("add:") for row in rows for button in row))
+        gemini = AsyncMock()
+        gemini.photo = None
+        callback = AsyncMock()
+        callback.message, callback.from_user, callback.data = gemini, user, "category:gemini"
+        await shop.category_callback(callback)
+        gemini_caption = gemini.answer_photo.call_args.kwargs["caption"]
+        self.assertIn("🔴", gemini_caption)
+        self.assertIn("нет в наличии", gemini_caption)
+        self.assertTrue(str(gemini.answer_photo.call_args.args[0].path).endswith("geminishop.jpg"))
+
+    async def test_admin_shelf_add_wizard_and_two_step_delete(self):
+        product_id = await self.product(stock=1)
+        user = User(id=ADMIN, is_bot=False, first_name="Owner")
+        message = AsyncMock()
+        message.photo = None
+        callback = AsyncMock()
+        callback.message, callback.from_user, callback.data = message, user, "category:chatgpt"
+        await shop.category_callback(callback)
+        rows = message.answer_photo.call_args.kwargs["reply_markup"].inline_keyboard
+        codes = [button.callback_data for row in rows for button in row]
+        self.assertIn(f"del:{product_id}", codes)
+        self.assertIn("add:chatgpt", codes)
+        shop.add_state.clear()
+        callback = AsyncMock()
+        callback.message, callback.from_user, callback.data = message, user, "add:chatgpt"
+        await shop.add_callback(callback)
+        self.assertEqual(shop.add_state[ADMIN]["step"], "name")
+        for text, step in (("ChatGPT Plus", "name"), ("790", "price"), ("3", "stock"), ("пропустить", "description")):
+            self.assertEqual(shop.add_state[ADMIN]["step"], step)
+            wizard_message = AsyncMock()
+            wizard_message.from_user = user
+            wizard_message.text = text
+            await shop.add_wizard(wizard_message)
+        self.assertNotIn(ADMIN, shop.add_state)
+        added = [item for item in (await self.store.catalog())["products"] if item["name"] == "ChatGPT Plus"]
+        self.assertEqual(len(added), 1)
+        self.assertEqual((added[0]["price"], added[0]["stock"]), (790, 3))
+        callback = AsyncMock()
+        callback.message, callback.from_user, callback.data = message, user, f"del:{product_id}"
+        await shop.delete_callback(callback)
+        self.assertIn((ADMIN, product_id), shop.pending_delete)
+        self.assertEqual(len((await self.store.catalog(admin=True))["products"]), 2)
+        await shop.delete_callback(callback)
+        self.assertNotIn((ADMIN, product_id), shop.pending_delete)
+        self.assertEqual([item["id"] for item in (await self.store.catalog(admin=True))["products"]], [added[0]["id"]])
+        shop.pending_delete.clear()
+        shop.add_state.clear()
+
+    async def test_wizard_rejects_bad_values_and_cancel(self):
+        user = User(id=ADMIN, is_bot=False, first_name="Owner")
+        message = AsyncMock()
+        message.photo = None
+        callback = AsyncMock()
+        callback.message, callback.from_user, callback.data = message, user, "add:gemini"
+        await shop.add_callback(callback)
+        bad = AsyncMock()
+        bad.from_user = user
+        bad.text = ""
+        await shop.add_wizard(bad)
+        self.assertEqual(shop.add_state[ADMIN]["step"], "name")
+        bad.text = "12.5"
+        shop.add_state[ADMIN]["step"] = "price"
+        await shop.add_wizard(bad)
+        self.assertEqual(shop.add_state[ADMIN]["step"], "price")
+        cancel = AsyncMock()
+        cancel.from_user = user
+        await shop.cmd_cancel(cancel)
+        self.assertNotIn(ADMIN, shop.add_state)
+        shop.add_state.clear()
+
+    async def test_delete_product_api(self):
+        product_id = await self.product()
+        self.assertEqual((await self.client.delete(f"/api/admin/products/{product_id}")).status, 401)
+        self.assertEqual((await self.client.delete(f"/api/admin/products/{product_id}", headers=headers())).status, 403)
+        self.assertEqual((await self.client.delete(f"/api/admin/products/{product_id}", headers=headers(ADMIN))).status, 200)
+        self.assertEqual((await self.client.delete(f"/api/admin/products/{product_id}", headers=headers(ADMIN))).status, 404)
+        self.assertEqual((await self.store.catalog(admin=True))["products"], [])
+
 
 
 if __name__ == "__main__":

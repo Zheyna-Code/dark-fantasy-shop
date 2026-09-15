@@ -192,6 +192,14 @@ class Store:
             await db.commit()
         return {"ok": True, "id": item_id}
 
+    async def delete_product(self, item_id):
+        async with self.connection() as db:
+            cursor = await db.execute("DELETE FROM products WHERE id=?", (item_id,))
+            if not cursor.rowcount:
+                raise ApiError("Товар не найден.", 404)
+            await db.commit()
+        return {"ok": True, "id": item_id}
+
     async def create_order(self, user_id, body):
         cart = body.get("cart")
         if not isinstance(cart, list) or not 1 <= len(cart) <= 30:
@@ -340,6 +348,10 @@ def register_api(app, store, bot_token, admin_ids, support_username):
         authenticate(request, True)
         return web.json_response(await store.change_order(item_id(request), (await body(request)).get("status")))
 
+    async def delete_product(request):
+        authenticate(request, True)
+        return web.json_response(await store.delete_product(item_id(request)))
+
     async def order(request):
         user = authenticate(request)
         payload = await body(request)
@@ -352,5 +364,6 @@ def register_api(app, store, bot_token, admin_ids, support_username):
         web.get("/api/admin/catalog", admin_catalog), web.get("/api/admin/orders", orders),
         web.post("/api/admin/categories", categories), web.patch("/api/admin/categories/{id}", categories),
         web.post("/api/admin/products", products), web.patch("/api/admin/products/{id}", products),
+        web.delete("/api/admin/products/{id}", delete_product),
         web.patch("/api/admin/orders/{id}", change_order),
     ])
