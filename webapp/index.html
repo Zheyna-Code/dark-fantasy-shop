@@ -254,6 +254,7 @@ button, .action { min-height: 44px; }
 .product-card { overflow-wrap: anywhere; }
 .card-description { white-space: pre-wrap; }
 .card-footer { flex-wrap: wrap; font-size: 11px; letter-spacing: 0; }
+.test-badge { color: #ffdca5; }
 .card-price { font: 20px/1.4 Georgia, serif; color: #ffe1b6; margin: 12px 0; }
 .product-card .action { width: 100%; margin-top: 12px; }
 .edge-nav { width: max(44px, calc((100% - var(--card-width)) / 2 - var(--gap))); }
@@ -570,6 +571,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
 
   function orderKind(product) {
     if (!product || !product.active || !integer(product.price) || product.price <= 0) return null;
+    if (product.is_test) return me && me.is_tester && product.stock > 0 ? "test" : null;
     if (product.stock > 0) return "order";
     return product.allow_preorder ? "preorder" : null;
   }
@@ -650,10 +652,11 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       card.append(node("p", "card-price", product.price > 0 ? money(product.price) : "Цена не задана"));
       const footer = node("div", "card-footer");
       footer.append(node("span", product.stock > 0 ? "in-stock" : "out-of-stock", stockText(product.stock)));
-      if (product.stock === 0 && product.allow_preorder) footer.append(node("span", "", "Доступен предзаказ"));
+      if (product.is_test) footer.append(node("span", "test-badge", "🧪 Тестовая выдача"));
+      else if (product.stock === 0 && product.allow_preorder) footer.append(node("span", "", "Предзаказ · предоплата 100%"));
       card.append(footer);
       const kind = orderKind(product);
-      const label = product.price <= 0 ? "Цена не задана" : !kind ? "Нет в наличии" : !initData() ? "Войди через Telegram" : !me ? "Подтверди вход" : !catalogReady ? "Обнови каталог" : kind === "preorder" ? "Предзаказать" : "Оформить заказ";
+      const label = product.price <= 0 ? "Цена не задана" : !kind ? (product.is_test ? "🧪 Тестовый товар" : "Нет в наличии") : !initData() ? "Войди через Telegram" : !me ? "Подтверди вход" : !catalogReady ? "Обнови каталог" : kind === "preorder" ? "Предзаказать" : kind === "test" ? "🧪 Тест-покупка (без оплаты)" : "Оформить заказ";
       const control = button(label, () => { if (performance.now() >= suppressClickUntil) openOrder(product.id); });
       control.classList.add("primary");
       card.append(control);
@@ -697,7 +700,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
         const oldId = availableProducts()[activeIndex]?.id;
         categories = data.categories.filter(category => category && typeof category.slug === "string" && category.active !== false && category.active !== 0);
         const slugs = new Set(categories.map(category => category.slug));
-        products = data.products.filter(product => product && product.id != null && enabled(product.active) && slugs.has(product.category)).map(product => ({ ...product, active: true, stock: integer(product.stock) ? product.stock : 0, price: integer(product.price) ? product.price : 0, allow_preorder: enabled(product.allow_preorder) }));
+        products = data.products.filter(product => product && product.id != null && enabled(product.active) && slugs.has(product.category)).map(product => ({ ...product, active: true, stock: integer(product.stock) ? product.stock : 0, price: integer(product.price) ? product.price : 0, allow_preorder: enabled(product.allow_preorder), is_test: enabled(product.is_test) }));
         catalogReady = true; catalogLoaded = true;
         if (selectedProvider && !slugs.has(selectedProvider) && !providers.has(selectedProvider)) selectedProvider = null;
         const index = availableProducts().findIndex(product => product.id === oldId);
@@ -804,8 +807,13 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       orderIntent = orderKeys.get(signature);
       orderIntent.signature = signature;
       orderIntent.done = false;
-      $("order-title").textContent = kind === "preorder" ? "Подтверждение предзаказа" : "Подтверждение заказа";
-      $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "preorder" ? "\nСейчас нет в наличии. Срок поступления уточни у поддержки." : ""}`;
+      $("order-title").textContent = kind === "preorder" ? "Подтверждение предзаказа" : kind === "test" ? "Тестовая покупка" : "Подтверждение заказа";
+      $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "preorder" ? "\nСейчас нет в наличии. Предзаказ по предоплате 100%." : kind === "test" ? "\nТестовый режим: оплата не требуется." : ""}`;
+      $("order-explanation").textContent = kind === "preorder"
+        ? "Предзаказ действует по предоплате 100%: внеси полную сумму хранителю лавки. Когда товар поступит, бот сначала выдаст оплаченные предзаказы по очереди и отправит товар в чат. Сейчас деньги не списываются."
+        : kind === "test"
+        ? "Тестовая покупка без оплаты: после подтверждения бот автоматически отправит товар в чат. Так тестеры проверяют автовыдачу."
+        : "Деньги сейчас не списываются. Оплата и выдача — вручную через поддержку. Подтверди отправку заявки.";
       feedback("order-feedback", orderIntent.attempted ? "Предыдущая отправка не подтверждена. Повтор использует тот же ключ заявки, чтобы не создать дубликат." : "");
       $("confirm-order").hidden = false; $("confirm-order").disabled = false;
       $("confirm-order").textContent = orderIntent.attempted ? "Повторить ту же заявку" : "Подтвердить заявку";
@@ -837,7 +845,9 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       intent.done = true;
       orderKeys.delete(intent.signature);
       const id = result?.id ?? result?.order_id ?? result?.order?.id;
-      feedback("order-feedback", `Заявка${id != null ? " № " + String(id) : ""} принята. Оплата не производилась. Свяжись с поддержкой для оплаты и получения товара.`);
+      feedback("order-feedback", intent.kind === "test"
+        ? `Тестовая покупка${id != null ? " № " + String(id) : ""} выполнена. Бот отправил товар тебе в чат.`
+        : `Заявка${id != null ? " № " + String(id) : ""} принята. Оплата не производилась. Свяжись с поддержкой для оплаты и получения товара.`);
       $("confirm-order").hidden = true;
       $("cancel-order").textContent = "Закрыть";
       $("order-support").hidden = false;

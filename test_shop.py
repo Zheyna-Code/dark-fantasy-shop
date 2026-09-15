@@ -21,6 +21,7 @@ from shop_backend import ApiError, Store, verify_init_data
 TOKEN = "123456:TEST_TOKEN_FOR_LOCAL_TESTS_ONLY"
 ADMIN = 111
 USER = 222
+TESTER = 333
 
 
 def init_data(user_id=USER, age=0, **overrides):
@@ -42,7 +43,8 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.store = Store(Path(self.temp.name) / "shop.db")
         await self.store.init_db()
         self.patches = [patch.object(shop, "store", self.store), patch.object(shop, "BOT_TOKEN", TOKEN),
-                        patch.object(shop, "ADMIN_IDS", {ADMIN}), patch.object(shop, "WEBAPP_URL", "https://example.org")]
+                        patch.object(shop, "ADMIN_IDS", {ADMIN}), patch.object(shop, "TESTER_IDS", {TESTER}),
+                        patch.object(shop, "WEBAPP_URL", "https://example.org")]
         for item in self.patches:
             item.start()
         self.client = TestClient(TestServer(await shop.make_app()))
@@ -145,6 +147,182 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.store.profile({"id": USER}))["preorders"], 1)
         await self.store.change_order(order["order_id"], "cancelled")
         self.assertEqual((await self.store.catalog())["products"][0]["stock"], 0)
+
+    async def test_preorder_prepay_queue_priority(self):
+        """Предзаказ с предоплатой 100%: поступивший товар сначала уходит оплаченным предзаказам."""
+        product_id = await self.product(stock=0, allow_preorder=True)
+        order = await self.store.create_order(USER, self.order(product_id, kind="preorder", key="pre-key-1"))
+        paid = await self.store.change_order(order["order_id"], "paid")
+        self.assertEqual(paid["status"], "paid")  # товара ещё нет — просто ждёт в очереди
+        result = await self.store.add_deliveries(product_id, {"items": ["ticket-1"]})
+        self.assertEqual(result["delivered_to_preorders"], 1)
+        self.assertEqual(result["stock_added"], 0)  # вся поставка ушла предзаказу
+        self.assertEqual((await self.store.catalog())["products"][0]["stock"], 0)
+        data = await self.store.orders()
+        done = next(item for item in data["orders"] if item["id"] == order["order_id"])
+        self.assertEqual(done["status"], "done")
+        # Следующая единица уже попадает на полку: очередь пуста.
+        result = await self.store.add_deliveries(product_id, {"items": ["ticket-2"]})
+        self.assertEqual((result["delivered_to_preorders"], result["stock_added"]), (0, 1))
+        self.assertEqual((await self.store.catalog())["products"][0]["stock"], 1)
+
+    async def test_paid_preorder_fulfilled_on_payment_when_stocked(self):
+        product_id = await self.product(stock=0, allow_preorder=True)
+        order = await self.store.create_order(USER, self.order(product_id, kind="preorder", key="pre-key-2"))
+        await self.store.add_deliveries(product_id, {"items": ["early-1"]})
+        result = await self.store.change_order(order["order_id"], "paid")
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["issued"][0]["items"][0]["payloads"], ["early-1"])
+        self.assertEqual((await self.store.catalog())["products"][0]["stock"], 0)
+
+    async def test_paid_order_auto_issue(self):
+        product_id = await self.product(stock=0)
+        await self.store.add_deliveries(product_id, {"items": ["secret-1"]})
+        order = await self.store.create_order(USER, self.order(product_id, key="buy-key-1"))
+        self.assertEqual((await self.store.catalog())["products"][0]["stock"], 0)
+        result = await self.store.change_order(order["order_id"], "paid")
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["issued"][0]["items"][0]["payloads"], ["secret-1"])
+
+    async def test_test_products_and_tester_purchase(self):
+        plain_id = await self.product(stock=1)
+        test_id = await self.product(stock=0, name="TEST ITEM", is_test=True)
+        self.assertEqual([item["id"] for item in (await self.store.catalog())["products"]], [plain_id])
+        self.assertEqual(len((await self.store.catalog(include_test=True))["products"]), 2)
+        with self.assertRaises(ApiError):
+            await self.store.create_test_order(USER, test_id)  # нет загруженных строк
+        await self.store.add_deliveries(test_id, {"items": ["login:pass"]})
+        result = await self.store.create_test_order(USER, test_id)
+        self.assertGreater(result["order_id"], 0)
+        self.assertEqual(result["issued"][0]["items"][0]["payloads"], ["login:pass"])
+        self.assertEqual((await self.store.product(test_id))["stock"], 0)
+        profile = await self.store.profile({"id": USER})
+        self.assertEqual((profile["purchases"], profile["spent"]), (0, 0))  # тест-покупки не в статистике
+        with self.assertRaises(ApiError):
+            await self.store.create_test_order(USER, test_id)  # строки закончились
+        with self.assertRaises(ApiError):
+            await self.store.create_test_order(USER, plain_id)  # обычный товар не продаётся без оплаты
+
+    async def test_test_order_http_and_permissions(self):
+        test_id = await self.product(stock=0, is_test=True)
+        await self.store.add_deliveries(test_id, {"items": ["one", "two"]})
+        catalog = await (await self.client.get("/api/catalog")).json()
+        self.assertEqual(catalog["products"], [])
+        tester_catalog = await (await self.client.get("/api/catalog", headers=headers(TESTER))).json()
+        self.assertEqual([item["id"] for item in tester_catalog["products"]], [test_id])
+        response = await self.client.post("/api/order", headers=headers(), json=self.order(test_id, kind="test", key="test-key-1"))
+        self.assertEqual(response.status, 403)
+        response = await self.client.post("/api/order", headers=headers(TESTER), json=self.order(test_id, kind="test", key="test-key-2"))
+        self.assertEqual(response.status, 200)
+        data = await response.json()
+        self.assertTrue(data["test"])
+        self.assertEqual((data["total"], data["issued"][0]["items"][0]["payloads"]), (0, ["one"]))
+        self.assertEqual((await self.client.post(f"/api/admin/products/{test_id}/deliveries", headers=headers(TESTER), json={"items": "x"})).status, 403)
+        response = await self.client.post(f"/api/admin/products/{test_id}/deliveries", headers=headers(ADMIN), json={"items": "a\n\nb"})
+        self.assertEqual(response.status, 200)
+        self.assertEqual((await response.json())["added"], 2)
+        view = await (await self.client.get(f"/api/admin/products/{test_id}/deliveries", headers=headers(ADMIN))).json()
+        self.assertEqual(view["ready"], 3)  # "two" осталась после тест-покупки + "a" и "b"
+        self.assertEqual(view["ready_samples"][:1], ["two"])
+
+    async def test_bot_product_buttons_preorder_and_test(self):
+        test_id = await self.product(stock=2, is_test=True)
+        item = await self.store.product(test_id)
+        texts = [button.text for row in shop.product_keyboard(item, can_test=True).inline_keyboard for button in row]
+        self.assertIn("🧪 Тестовая покупка без оплаты", texts)
+        self.assertNotIn("Купить", texts)
+        texts = [button.text for row in shop.product_keyboard(item, can_test=False).inline_keyboard for button in row]
+        self.assertFalse(any("Тестовая покупка" in text for text in texts))
+        plain_id = await self.product(stock=0, allow_preorder=True)
+        item = await self.store.product(plain_id)
+        texts = [button.text for row in shop.product_keyboard(item).inline_keyboard for button in row]
+        self.assertTrue(any("Предзаказ" in text and "предоплата 100%" in text for text in texts))
+        stocked_id = await self.product(stock=1)
+        item = await self.store.product(stocked_id)
+        texts = [button.text for row in shop.product_keyboard(item).inline_keyboard for button in row]
+        self.assertIn("Купить", texts)
+
+    async def test_bot_test_purchase_sends_payload_to_chat(self):
+        test_id = await self.product(stock=1, is_test=True)
+        await self.store.add_deliveries(test_id, {"items": ["login:pass"]})
+        callback = AsyncMock()
+        callback.message = AsyncMock()
+        callback.from_user = User(id=TESTER, is_bot=False, first_name="Tester")
+        callback.data = f"buy:{test_id}"
+        await shop.buy_callback(callback)
+        text = callback.message.answer.call_args.args[0]
+        self.assertIn("Тестовая покупка", text)
+        self.assertIn("login:pass", text)
+        # не-тестер получает отказ
+        stranger = AsyncMock()
+        stranger.message = AsyncMock()
+        stranger.from_user = User(id=USER, is_bot=False, first_name="Stranger")
+        stranger.data = f"buy:{test_id}"
+        await shop.buy_callback(stranger)
+        stranger.message.answer.assert_not_awaited()
+        self.assertTrue(stranger.answer.call_args.kwargs.get("show_alert"))
+
+    async def test_bot_preorder_button_creates_order(self):
+        plain_id = await self.product(stock=0, allow_preorder=True)
+        callback = AsyncMock()
+        callback.message = AsyncMock()
+        callback.from_user = User(id=USER, is_bot=False, first_name="Tester")
+        callback.data = f"preorder:{plain_id}"
+        await shop.preorder_callback(callback)
+        text = callback.message.answer.call_args.args[0]
+        self.assertIn("Предзаказ №", text)
+        self.assertIn("предоплате 100%", text)
+        profile = await self.store.profile({"id": USER})
+        self.assertEqual(profile["preorders"], 1)
+        # повторный предзаказ не создаёт дубликат
+        again = AsyncMock()
+        again.message = AsyncMock()
+        again.from_user = User(id=USER, is_bot=False, first_name="Tester")
+        again.data = f"preorder:{plain_id}"
+        await shop.preorder_callback(again)
+        self.assertIn("уже оформлен", again.answer.call_args.args[0])
+        profile = await self.store.profile({"id": USER})
+        self.assertEqual(profile["preorders"], 1)
+
+    async def test_bot_upload_wizard_and_auto_issue(self):
+        product_id = await self.product(stock=0, allow_preorder=True)
+        order = await self.store.create_order(USER, self.order(product_id, kind="preorder", key="up-key-1"))
+        await self.store.change_order(order["order_id"], "paid")
+        user = User(id=ADMIN, is_bot=False, first_name="Owner")
+        callback = AsyncMock()
+        callback.message = AsyncMock()
+        callback.message.photo = None
+        callback.from_user = user
+        callback.data = f"upload:{product_id}"
+        await shop.upload_callback(callback)
+        self.assertIn(ADMIN, shop.upload_state)
+        self.assertIn("одна строка = одна единица", callback.message.answer.call_args.args[0])
+        wizard_message = AsyncMock()
+        wizard_message.from_user = user
+        wizard_message.text = "acc1:pw1\nacc2:pw2"
+        await shop.upload_wizard(wizard_message)
+        self.assertNotIn(ADMIN, shop.upload_state)
+        reply = wizard_message.answer.call_args.args[0]
+        self.assertIn("Загружено единиц товара: 2", reply)
+        self.assertIn("предзаказам", reply)
+        data = await self.store.orders()
+        done = next(item for item in data["orders"] if item["id"] == order["order_id"])
+        self.assertEqual(done["status"], "done")
+        shop.upload_state.clear()
+
+    async def test_notify_deliveries_sends_messages(self):
+        bot = AsyncMock()
+        shop.active_bot["bot"] = bot
+        try:
+            await shop.notify_deliveries([{"user_id": USER, "order_id": 7, "kind": "preorder",
+                                           "items": [{"name": "ChatGPT 1M", "payloads": ["tok-1"]}]}])
+            bot.send_message.assert_awaited_once()
+            args = bot.send_message.call_args.args
+            self.assertEqual(args[0], USER)
+            self.assertIn("tok-1", args[1])
+            self.assertIn("Предзаказ", args[1])
+        finally:
+            shop.active_bot.pop("bot", None)
 
     async def test_bad_order_rolls_back_all_inventory(self):
         product_id = await self.product(stock=1)

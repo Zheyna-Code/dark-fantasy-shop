@@ -6,6 +6,7 @@ import re
 from html import escape
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import uuid4
 
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
@@ -34,6 +35,8 @@ def parse_admin_ids(value):
 
 
 ADMIN_IDS = parse_admin_ids(os.environ.get("ADMIN_IDS", ""))
+# Testers buy test products without payment to check automatic delivery.
+TESTER_IDS = parse_admin_ids(os.environ.get("TESTER_IDS", ""))
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("lavka")
 store = Store(DB_PATH)
@@ -64,8 +67,18 @@ ADD_PROMPTS = {
     "stock": "Шаг 3 из 4. Отправь остаток целым числом (0 — товара нет в наличии).",
     "description": "Шаг 4 из 4. Отправь описание товара или слово «пропустить».",
 }
+UPLOAD_PROMPT = (
+    "<b>📤 Загрузка автовыдачи: {name}</b>\n\n"
+    "Отправь одним сообщением список товара — <b>одна строка = одна единица товара</b> "
+    "(логин:пароль, ключ, ссылка — до 2000 символов на строку, максимум 200 строк).\n\n"
+    "Сразу после загрузки бот выдаст товар оплаченным предзаказам по очереди, "
+    "а остаток выставит на полку. Тестовые покупки заберут строки без оплаты.\n\n"
+    "Отмена — кнопка ниже или команда /cancel."
+)
 # Conversational product wizard: user_id -> {"slug", "step", "data", "message"}.
 add_state = {}
+# Conversational auto-delivery upload: user_id -> {"product_id", "name", "lines"}.
+upload_state = {}
 # Two-step delete confirmation: set of (user_id, product_id).
 pending_delete = set()
 # Last opened photo shelf per user, used to refresh it after add/delete.
@@ -101,6 +114,10 @@ def back_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[blue_button("В меню", callback_data="menu:home")]])
 
 
+def cancel_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[[blue_button("Отмена", callback_data="upload:cancel")]])
+
+
 def categories_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button(title, callback_data="category:" + slug) for slug, title in CATEGORY_TITLES.items()],
@@ -130,8 +147,9 @@ def category_items(slug, catalog):
 def category_caption(slug, items):
     lines = [
         f"<b>Полка {CATEGORY_TITLES[slug]}</b>", "",
-        "Выбирай товар, путник. Если артефакт закончился, можно оформить предзаказ — "
-        "хранитель сообщит срок поступления. Перед покупкой обязательно открой карточку: "
+        "Выбирай товар, путник. Если артефакт закончился, можно оформить предзаказ "
+        "с предоплатой 100% — при поступлении бот сначала выдаст предзаказы по очереди, "
+        "и только потом остаток попадёт на полку. Перед покупкой обязательно открой карточку: "
         "там указаны цена, наличие и гарантия на товар.", "",
     ]
     shown = items[:12]
@@ -139,8 +157,12 @@ def category_caption(slug, items):
         lines.append("🔴 Полка пуста: хранитель лавки ещё не выложил артефакты.")
     for item in shown:
         stock = item["stock"] if type(item["stock"]) is int else 0
-        mark = "🟢" if stock > 0 else "🔴"
-        state = f"в наличии: {stock}" if stock > 0 else "нет в наличии"
+        if item.get("is_test"):
+            mark, state = "🧪", f"тестовых единиц: {stock}"
+        elif stock > 0:
+            mark, state = "🟢", f"в наличии: {stock}"
+        else:
+            mark, state = "🔴", "нет в наличии"
         lines.append(f"{mark} <b>{escape(item['name'])}</b> — {state}; открой карточку кнопкой ниже")
     if len(items) > len(shown):
         lines.append(f"… и ещё {len(items) - len(shown)}: смотри мини-лавку.")
@@ -152,7 +174,10 @@ def category_keyboard(user_id, slug, items, is_admin):
     rows = []
     for item in items[:12]:
         stock = item["stock"] if type(item["stock"]) is int else 0
-        mark = "🟢" if stock > 0 else "🔴"
+        if item.get("is_test"):
+            mark = "🧪"
+        else:
+            mark = "🟢" if stock > 0 else "🔴"
         rows.append([blue_button(f"{mark} {item['name'][:50]}", callback_data=f"product:{item['id']}")])
     if is_admin:
         for item in items[:20]:
@@ -166,34 +191,49 @@ def category_keyboard(user_id, slug, items, is_admin):
 
 def product_caption(item):
     stock = item["stock"] if type(item["stock"]) is int else 0
-    if stock > 0:
+    if item.get("is_test"):
+        availability = f"🧪 Тестовый товар · единиц для выдачи: {stock}"
+    elif stock > 0:
         availability = f"🟢 В наличии: {stock}"
     elif item.get("allow_preorder"):
-        availability = "🔴 Нет в наличии · доступен предзаказ"
+        availability = "🔴 Нет в наличии · предзаказ по предоплате 100%"
     else:
         availability = "🔴 Нет в наличии"
     description = escape(item.get("description") or "Описание уточняется у хранителя.")
     warranty = escape(item.get("warranty") or "Уточняется у хранителя перед оплатой.")
     price = f"{item['price']:,} ₽" if type(item.get("price")) is int and item["price"] > 0 else "Цена уточняется"
+    note = ("\n\n🧪 Тестовый товар: тестер покупает его без оплаты, чтобы проверить автовыдачу."
+            if item.get("is_test") else "")
     return (
         f"<b>{escape(item['name'])}</b>\n\n"
         f"{description}\n\n"
         f"<b>Цена:</b> {price}\n"
         f"<b>Наличие:</b> {availability}\n"
-        f"<b>Гарантия:</b> {warranty}\n\n"
+        f"<b>Гарантия:</b> {warranty}{note}\n\n"
         "Внимательно проверь условия гарантии перед оформлением заявки."
     )
 
 
-def product_keyboard(item):
-    rows = [[blue_button("Купить", callback_data=f"buy:{item['id']}")]]
+def product_keyboard(item, can_test=False, is_admin=False):
+    stock = item["stock"] if type(item["stock"]) is int else 0
+    rows = []
+    if item.get("is_test"):
+        if stock > 0 and can_test:
+            rows.append([blue_button("🧪 Тестовая покупка без оплаты", callback_data=f"buy:{item['id']}")])
+    elif stock > 0:
+        rows.append([blue_button("Купить", callback_data=f"buy:{item['id']}")])
+    elif item.get("allow_preorder"):
+        rows.append([blue_button("⏳ Предзаказ · предоплата 100%", callback_data=f"preorder:{item['id']}")])
+    if is_admin:
+        rows.append([blue_button("📤 Загрузить автовыдачу", callback_data=f"upload:{item['id']}")])
     rows.append([blue_button("Назад", callback_data=f"category:{item['category']}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def show_category(message, user, slug):
     last_shelf[user.id] = slug
-    catalog = await store.catalog()
+    include_test = user.id in TESTER_IDS or user.id in ADMIN_IDS
+    catalog = await store.catalog(include_test=include_test)
     items = category_items(slug, catalog)
     caption = category_caption(slug, items)
     markup = category_keyboard(user.id, slug, items, user.id in ADMIN_IDS)
@@ -243,6 +283,7 @@ async def cmd_id(message: Message):
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: Message):
     state = add_state.pop(message.from_user.id, None)
+    upload_state.pop(message.from_user.id, None)
     if not state:
         await message.answer("Активных действий нет. Продолжай путь, путник.")
         return
@@ -275,7 +316,10 @@ async def cmd_admin(message: Message):
     await message.answer(
         "<b>Управление Лавкой Странника</b>\n\n"
         "Здесь можно добавлять товары, менять цены и остатки, удалять карточки, "
-        "а также отмечать оплату и выдачу заказов. "
+        "загружать товар для автовыдачи (одна строка = одна единица), "
+        "отмечать оплату и выдачу заказов. Предзаказы оплачиваются на 100% вперёд: "
+        "при поступлении товара бот сначала выдаёт оплаченные предзаказы по очереди, "
+        "и только остаток выставляется на полку. "
         "Нажми кнопку ниже. Доступ проверяется по твоему Telegram ID на сервере.",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
             blue_button("Открыть админку", web_app=WebAppInfo(url=url))
@@ -336,6 +380,72 @@ async def add_wizard(message: Message):
     await prompt_add(state["message"], state)
 
 
+@dp.message(F.text, ~F.text.startswith("/"), lambda message: message.from_user.id in upload_state)
+async def upload_wizard(message: Message):
+    user = message.from_user
+    state = upload_state.get(user.id)
+    if not state:
+        return
+    lines = [line.strip() for line in (message.text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not 1 <= len(lines) <= 200 or any(len(line) > 2000 for line in lines):
+        await message.answer(
+            "Нужно от 1 до 200 строк, каждая до 2000 символов: одна строка — одна единица товара. "
+            "Отправь список заново или нажми «Отмена»."
+        )
+        return
+    try:
+        result = await store.add_deliveries(state["product_id"], {"items": lines})
+    except ApiError as error:
+        await message.answer(f"Не удалось загрузить автовыдачу: {error.message}")
+        return
+    upload_state.pop(user.id, None)
+    parts = [f"<b>✅ Загружено единиц товара: {result['added']}</b>"]
+    if result["delivered_to_preorders"]:
+        parts.append(f"📦 Автовыдача сразу отправила товар {result['delivered_to_preorders']} оплаченным предзаказам — покупатели получили его в чат.")
+    parts.append(f"🟢 Выставлено на полку: {result['stock_added']}")
+    parts.append("Теперь кнопка покупки в карточке выдаёт эти строки автоматически.")
+    await message.answer("\n".join(parts), parse_mode="HTML")
+    if state.get("message") is not None:
+        slug = last_shelf.get(user.id)
+        if slug in CATEGORY_PHOTOS:
+            await show_category(state["message"], user, slug)
+
+
+@dp.callback_query(F.data.startswith("upload:"))
+async def upload_callback(callback: CallbackQuery):
+    user = callback.from_user
+    value = callback.data.split(":", 1)[1]
+    if value == "cancel":
+        state = upload_state.pop(user.id, None)
+        await callback.answer()
+        if state and last_shelf.get(user.id) in CATEGORY_PHOTOS:
+            slug = last_shelf[user.id]
+            await show_category(callback.message, user, slug)
+        return
+    if user.id not in ADMIN_IDS:
+        await callback.answer("Загружать автовыдачу может только хранитель лавки.", show_alert=True)
+        return
+    if not value.isdecimal() or len(value) > 19:
+        await callback.answer()
+        return
+    item = await store.product(int(value))
+    if not item:
+        await callback.answer("Товар больше не найден.", show_alert=True)
+        return
+    add_state.pop(user.id, None)
+    upload_state[user.id] = {"product_id": item["id"], "message": callback.message}
+    await callback.answer()
+    prompt = UPLOAD_PROMPT.format(name=escape(item["name"]))
+    if callback.message.photo:
+        try:
+            await callback.message.edit_caption(caption=prompt, parse_mode="HTML", reply_markup=cancel_keyboard())
+            return
+        except Exception as error:
+            log.warning("edit_caption failed, sending upload prompt: %s", error)
+    await callback.message.answer(prompt, parse_mode="HTML", reply_markup=cancel_keyboard())
+
+
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_callback(callback: CallbackQuery):
     await callback.answer()
@@ -343,6 +453,7 @@ async def menu_callback(callback: CallbackQuery):
     action = callback.data.split(":", 1)[1]
     if action in ("home", "products", "shop"):
         add_state.pop(user.id, None)
+        upload_state.pop(user.id, None)
     if action == "home":
         await send_menu(message, user)
     elif action == "shop":
@@ -403,6 +514,7 @@ async def category_callback(callback: CallbackQuery):
     if slug not in CATEGORY_PHOTOS:
         return
     add_state.pop(callback.from_user.id, None)
+    upload_state.pop(callback.from_user.id, None)
     await show_category(callback.message, callback.from_user, slug)
 
 
@@ -412,12 +524,14 @@ async def product_callback(callback: CallbackQuery):
     if not value.isdecimal() or len(value) > 19:
         await callback.answer()
         return
-    item = next((product for product in (await store.catalog())["products"] if product["id"] == int(value)), None)
-    if not item:
+    item = await store.product(int(value))
+    if not item or not item["active"]:
         await callback.answer("Товар больше не найден.", show_alert=True)
         return
     await callback.answer()
-    markup = product_keyboard(item)
+    user = callback.from_user
+    can_test = user.id in TESTER_IDS or user.id in ADMIN_IDS
+    markup = product_keyboard(item, can_test, user.id in ADMIN_IDS)
     if callback.message.photo:
         try:
             await callback.message.edit_caption(caption=product_caption(item), parse_mode="HTML", reply_markup=markup)
@@ -427,12 +541,94 @@ async def product_callback(callback: CallbackQuery):
     await callback.message.answer(product_caption(item), parse_mode="HTML", reply_markup=markup)
 
 
+def issued_message(event, head):
+    lines = [f"<b>{head}</b>", "", "Бот выдал покупку автоматически:", ""]
+    for product_item in event.get("items", []):
+        lines.append(f"<b>{escape(str(product_item.get('name', 'Товар')))}</b>")
+        lines.extend(f"<code>{escape(str(payload))}</code>" for payload in product_item.get("payloads", []))
+        lines.append("")
+    lines.append(f"Если товар не работает — напиши в поддержку: @{SUPPORT_USERNAME}")
+    return "\n".join(lines)
+
+
 @dp.callback_query(F.data.startswith("buy:"))
 async def buy_callback(callback: CallbackQuery):
+    value = callback.data.split(":", 1)[1]
+    if not value.isdecimal() or len(value) > 19:
+        await callback.answer()
+        return
+    user = callback.from_user
+    item = await store.product(int(value))
+    if not item or not item["active"]:
+        await callback.answer("Товар больше не найден.", show_alert=True)
+        return
+    if item.get("is_test"):
+        if user.id not in TESTER_IDS and user.id not in ADMIN_IDS:
+            await callback.answer("🧪 Это тестовый товар: покупка без оплаты доступна только тестерам.", show_alert=True)
+            return
+        try:
+            result = await store.create_test_order(user.id, item["id"])
+        except ApiError as error:
+            await callback.answer(error.message, show_alert=True)
+            return
+        await callback.message.answer(
+            issued_message(result["issued"][0], f"🧪 Тестовая покупка — заказ № {result['order_id']}"),
+            parse_mode="HTML",
+        )
+        await callback.answer("Тестовая покупка выполнена.")
+        return
     await callback.answer(
-        "Покупка пока не подключена. Оформи предзаказ или уточни условия у хранителя лавки.",
+        "Оплата ещё не подключена: оформи заказ в мини-лавке «🏪 Лавка Странника» "
+        "или уточни условия у хранителя.",
         show_alert=True,
     )
+
+
+@dp.callback_query(F.data.startswith("preorder:"))
+async def preorder_callback(callback: CallbackQuery):
+    value = callback.data.split(":", 1)[1]
+    if not value.isdecimal() or len(value) > 19:
+        await callback.answer()
+        return
+    user = callback.from_user
+    item = await store.product(int(value))
+    if not item or not item["active"] or item.get("is_test"):
+        await callback.answer("Товар больше не найден.", show_alert=True)
+        return
+    if item["stock"] > 0 or not item.get("allow_preorder"):
+        await callback.answer("Предзаказ недоступен: товар уже есть в наличии.", show_alert=True)
+        return
+    existing = await store.active_preorder(user.id, item["id"])
+    if existing:
+        await callback.answer(
+            f"Предзаказ № {existing['id']} уже оформлен" + (
+                " и оплачен — ждёт поступления товара." if existing["status"] == "paid"
+                else ". Внеси предоплату 100% у хранителя, чтобы встать в очередь на выдачу."),
+            show_alert=True,
+        )
+        return
+    try:
+        result = await store.create_order(user.id, {
+            "cart": [{"id": item["id"], "qty": 1}], "kind": "preorder",
+            "idempotency_key": uuid4().hex, "comment": "",
+        })
+    except ApiError as error:
+        await callback.answer(error.message, show_alert=True)
+        return
+    price = f"{item['price']:,} ₽" if type(item.get("price")) is int and item["price"] > 0 else "уточняется у хранителя"
+    await callback.message.answer(
+        f"<b>⏳ Предзаказ № {result['order_id']} оформлен</b>\n\n"
+        f"{escape(item['name'])} — {price}.\n\n"
+        "Предзаказ действует по <b>предоплате 100%</b>: внеси полную сумму у хранителя лавки. "
+        "Когда товар поступит, бот <b>сначала выдаст оплаченные предзаказы по очереди</b> "
+        "и только потом выставит остаток на полку. Товар придёт тебе в этот чат автоматически.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [blue_button("🛟 Оплатить предоплату", url=f"https://t.me/{SUPPORT_USERNAME}")],
+            [blue_button("В меню", callback_data="menu:home")],
+        ]),
+    )
+    await callback.answer("Предзаказ оформлен.")
 
 
 @dp.callback_query(F.data.startswith("add:"))
@@ -450,6 +646,8 @@ async def add_callback(callback: CallbackQuery):
         return
     if slug not in CATEGORY_PHOTOS:
         return
+    add_state.pop(user.id, None)
+    upload_state.pop(user.id, None)
     add_state[user.id] = {"slug": slug, "step": ADD_STEPS[0], "data": {}, "message": callback.message}
     await callback.answer()
     await prompt_add(callback.message, add_state[user.id])
@@ -483,9 +681,31 @@ async def delete_callback(callback: CallbackQuery):
         await show_category(callback.message, user, slug)
 
 
+# Live bot instance for automatic delivery messages; set in main().
+active_bot = {}
+
+
+async def notify_deliveries(events):
+    """Отправляет покупателям выданные строки товара; вызывается API после записи в базу."""
+    bot = active_bot.get("bot")
+    if not bot or not events:
+        return
+    for event in events:
+        if event.get("kind") == "test":
+            head = f"🧪 Тестовая покупка № {event.get('order_id')} — автовыдача сработала"
+        elif event.get("kind") == "preorder":
+            head = f"📦 Предзаказ № {event.get('order_id')} выполнен — товар у тебя"
+        else:
+            head = f"📦 Заказ № {event.get('order_id')} оплачен — товар выдан"
+        try:
+            await bot.send_message(event["user_id"], issued_message(event, head), parse_mode="HTML")
+        except Exception as error:
+            log.warning("Delivery notice to user %s failed: %s", event.get("user_id"), error)
+
+
 async def make_app():
     application = web.Application(client_max_size=64 * 1024)
-    register_api(application, store, BOT_TOKEN, ADMIN_IDS, SUPPORT_USERNAME)
+    register_api(application, store, BOT_TOKEN, ADMIN_IDS, SUPPORT_USERNAME, testers=TESTER_IDS, notifier=notify_deliveries)
 
     async def index(request):
         return web.FileResponse(BASE_DIR / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})
@@ -517,6 +737,7 @@ async def main():
             await asyncio.Event().wait()
         else:
             async with Bot(BOT_TOKEN) as bot:
+                active_bot["bot"] = bot
                 await bot.set_my_commands([
                     BotCommand(command="menu", description="Открыть меню лавки"),
                     BotCommand(command="admin", description="Управление лавкой"),
