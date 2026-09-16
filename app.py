@@ -473,6 +473,8 @@ async def add_wizard(message: Message):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                 blue_button("Открыть карточку товара", callback_data=f"product:{saved['id']}")
+            ], [
+                blue_button("Загрузить автовыдачу", callback_data=f"upload:{saved['id']}")
             ]]),
         )
         if state.get("message") is not None:
