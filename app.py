@@ -133,6 +133,28 @@ def back_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[blue_button("В меню", callback_data="menu:home")]])
 
 
+def wallet_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button("Пополнить 100 ₽", callback_data="wallet:100"), blue_button("Пополнить 250 ₽", callback_data="wallet:250")],
+        [blue_button("Пополнить 500 ₽", callback_data="wallet:500"), blue_button("Пополнить 1000 ₽", callback_data="wallet:1000")],
+        [blue_button("Пополнить 1500 ₽", callback_data="wallet:1500")],
+        [blue_button("В меню", callback_data="menu:home")],
+    ])
+
+
+async def replace_message(message, text, reply_markup=None):
+    """Edit callback message in place; fall back to a new message for commands."""
+    try:
+        if getattr(message, "photo", None):
+            await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=reply_markup)
+        else:
+            await message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
+        return
+    except Exception:
+        pass
+    await message.answer(text, parse_mode="HTML", reply_markup=reply_markup)
+
+
 def cancel_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[styled_button("Отмена", "danger", callback_data="upload:cancel")]])
 
@@ -537,15 +559,7 @@ async def menu_callback(callback: CallbackQuery):
         await send_photo(message, "2.jpg", caption, back_keyboard())
     elif action == "wallet":
         profile = await store.profile(user.model_dump(), user.id in ADMIN_IDS)
-        await message.answer(
-            f"<b>Кошелёк странника</b>\n\nБаланс: <b>{profile['balance']:,} ₽</b>\n\n"
-            "Пополнение пока не подключено. Оплату и получение товара согласуй с поддержкой; "
-            "нажатие кнопок не списывает деньги.", parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [blue_button("🛟 Техподдержка", url=f"https://t.me/{SUPPORT_USERNAME}")],
-                [blue_button("В меню", callback_data="menu:home")],
-            ]),
-        )
+        await replace_message(message, f"<b>Кошелёк странника</b>\n\nБаланс: <b>{profile['balance']:,} ₽</b>\n\nВыбери сумму пополнения:", wallet_keyboard())
     elif action == "support":
         await message.answer(
             "<b>Хранитель лавки на связи</b>\n\n"
@@ -556,6 +570,18 @@ async def menu_callback(callback: CallbackQuery):
                 [blue_button("В меню", callback_data="menu:home")],
             ]),
         )
+
+
+@dp.callback_query(F.data.startswith("wallet:"))
+async def wallet_topup_callback(callback: CallbackQuery):
+    value = callback.data.split(":", 1)[1]
+    if not value.isdecimal() or int(value) not in (100, 250, 500, 1000, 1500):
+        await callback.answer("Недоступная сумма.", show_alert=True)
+        return
+    amount = int(value)
+    balance = await store.add_balance(callback.from_user.id, amount)
+    await callback.answer(f"Баланс пополнен на {amount} ₽")
+    await replace_message(callback.message, f"<b>Кошелёк странника</b>\n\nБаланс: <b>{balance:,} ₽</b>\n\nВыбери сумму пополнения:", wallet_keyboard())
 
 
 @dp.callback_query(F.data.startswith("category:"))
@@ -663,11 +689,38 @@ async def buy_callback(callback: CallbackQuery):
         )
         await callback.answer("Тестовая покупка выполнена.")
         return
-    await callback.answer(
-        "Оплата ещё не подключена: оформи заказ в мини-лавке «🏪 Лавка Странника» "
-        "или уточни условия у хранителя.",
-        show_alert=True,
-    )
+    price = f"{item['price']:,} ₽"
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button(f"💰 Баланс · {price}", callback_data=f"pay:{item['id']}:balance")],
+        [blue_button("₿ Крипта (скоро)", callback_data=f"pay:{item['id']}:crypto"), blue_button("₽ СБП (скоро)", callback_data=f"pay:{item['id']}:sbp")],
+        [styled_button("Назад", "danger", callback_data=f"product:{item['id']}")],
+    ])
+    await callback.answer()
+    await replace_message(callback.message, f"<b>Оплата заказа</b>\n\n{escape(item['name'])} · {price}\n\nВыбери способ оплаты:", markup)
+
+
+@dp.callback_query(F.data.startswith("pay:"))
+async def payment_callback(callback: CallbackQuery):
+    try:
+        _, raw_id, payment = callback.data.split(":", 2)
+        product_id = int(raw_id)
+    except (ValueError, TypeError):
+        await callback.answer()
+        return
+    if payment in ("crypto", "sbp"):
+        await callback.answer("Этот способ оплаты скоро будет доступен.", show_alert=True)
+        return
+    item = await store.product(product_id)
+    if not item or not item["active"] or item.get("is_test"):
+        await callback.answer("Товар больше не найден.", show_alert=True)
+        return
+    try:
+        result = await store.create_order(callback.from_user.id, {"cart": [{"id": product_id, "qty": 1}], "kind": "order", "payment": "balance", "idempotency_key": uuid4().hex, "comment": ""})
+    except ApiError as error:
+        await callback.answer(error.message, show_alert=True)
+        return
+    await callback.answer("Заказ оплачен с баланса")
+    await replace_message(callback.message, f"<b>Заказ № {result['order_id']} оформлен</b>\n\nСписано: <b>{result['total']:,} ₽</b>. Заказ передан на выдачу.", back_keyboard())
 
 
 @dp.callback_query(F.data.startswith("preorder:"))

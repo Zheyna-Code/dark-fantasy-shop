@@ -357,8 +357,11 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <p class="eyebrow">Кошель странника</p><h1 id="wallet-title" tabindex="-1">Кошелёк</h1>
       <p>Баланс</p><p class="wallet-balance" id="wallet-balance">—</p>
       <p id="wallet-login">Баланс доступен после входа через Telegram.</p>
-      <p id="payment-note">Платёжный сервис не подключён. Пополнение и онлайн-оплата недоступны. Оформление и исполнение заказов — вручную через поддержку.</p>
-      <a class="action support-link" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer">@DitzzmBack</a>
+      <p id="payment-note">Выбери сумму пополнения баланса:</p>
+      <div class="form-actions" id="topup-actions">
+        <button class="action" type="button" data-topup="100">100 ₽</button><button class="action" type="button" data-topup="250">250 ₽</button><button class="action" type="button" data-topup="500">500 ₽</button><button class="action" type="button" data-topup="1000">1000 ₽</button><button class="action" type="button" data-topup="1500">1500 ₽</button>
+      </div>
+      <p class="feedback" id="wallet-feedback" role="status" aria-live="polite"></p>
     </section>
     <section class="page-panel" id="view-support" data-page="support" aria-labelledby="support-title" hidden>
       <p class="eyebrow">Огонь у дороги</p><h1 id="support-title" tabindex="-1">Поддержка</h1>
@@ -414,6 +417,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   <h2 id="order-title">Подтверждение заказа</h2>
   <p id="order-summary"></p>
   <p id="order-explanation">Деньги сейчас не списываются. Оплата и выдача — вручную через поддержку. Подтверди отправку заявки.</p>
+  <div class="form-actions" id="payment-methods" hidden><button class="action primary" type="button" data-payment="balance">Баланс</button><button class="action" type="button" data-payment="crypto">Крипта (скоро)</button><button class="action" type="button" data-payment="sbp">СБП (скоро)</button></div>
   <p id="order-feedback" class="feedback" role="status" aria-live="polite"></p>
   <div class="form-actions"><button class="action primary" id="confirm-order" type="button">Подтвердить заявку</button><button class="action" id="cancel-order" type="button">Отмена</button></div>
   <a class="action support-link" id="order-support" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer" hidden>@DitzzmBack</a>
@@ -445,7 +449,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   let pointerStart = null, suppressClickUntil = 0, app = null;
   let adminCategories = [], adminProducts = [], adminReady = false, adminRequest = null, adminBusy = false;
   let editingCategory = null, editingProduct = null;
-  let orderIntent = null, orderBusy = false;
+  let orderIntent = null, orderBusy = false, selectedPayment = "balance";
   const orderKeys = new Map();
 
   function node(tag, className = "", text) {
@@ -779,6 +783,13 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     })();
     return meRequest;
   }
+  async function topup(amount) {
+    if (!me || !initData()) return;
+    document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = true; });
+    try { const data = await api("/api/wallet/topup", { method: "POST", auth: true, body: { amount } }); me.balance = data.balance; renderSession(); feedback("wallet-feedback", `Баланс пополнен на ${money(amount)}.`); }
+    catch (error) { feedback("wallet-feedback", message(error), true); }
+    finally { document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = false; }); }
+  }
   function setView(view, focus = true) {
     if (!["catalog", "profile", "wallet", "support", "admin"].includes(view) || (view === "admin" && !isAdmin())) return;
     currentView = view;
@@ -811,13 +822,16 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       orderIntent = orderKeys.get(signature);
       orderIntent.signature = signature;
       orderIntent.done = false;
+      selectedPayment = kind === "order" ? "balance" : "manual";
       $("order-title").textContent = kind === "preorder" ? "Подтверждение предзаказа" : kind === "test" ? "Тестовая покупка" : "Подтверждение заказа";
       $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "preorder" ? "\nСейчас нет в наличии. Предзаказ по предоплате 100%." : kind === "test" ? "\nТестовый режим: оплата не требуется." : ""}`;
       $("order-explanation").textContent = kind === "preorder"
         ? "Предзаказ действует по предоплате 100%: внеси полную сумму хранителю лавки. Когда товар поступит, бот сначала выдаст оплаченные предзаказы по очереди и отправит товар в чат. Сейчас деньги не списываются."
         : kind === "test"
         ? "Тестовая покупка без оплаты: после подтверждения бот автоматически отправит товар в чат. Так тестеры проверяют автовыдачу."
-        : "Деньги сейчас не списываются. Оплата и выдача — вручную через поддержку. Подтверди отправку заявки.";
+        : "Выбери способ оплаты: баланс доступен сейчас, крипта и СБП появятся позже.";
+      $("payment-methods").hidden = kind !== "order";
+      document.querySelectorAll("[data-payment]").forEach(button => button.classList.toggle("primary", button.dataset.payment === selectedPayment));
       feedback("order-feedback", orderIntent.attempted ? "Предыдущая отправка не подтверждена. Повтор использует тот же ключ заявки, чтобы не создать дубликат." : "");
       $("confirm-order").hidden = false; $("confirm-order").disabled = false;
       $("confirm-order").textContent = orderIntent.attempted ? "Повторить ту же заявку" : "Подтвердить заявку";
@@ -845,7 +859,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     feedback("order-feedback", "Отправляем заявку…");
     intent.attempted = true;
     try {
-      const result = await api("/api/order", { method: "POST", auth: true, body: { cart: [{ id: intent.product.id, qty: 1 }], kind: intent.kind, comment: "", idempotency_key: intent.key } });
+      if (intent.kind === "order" && selectedPayment !== "balance") throw new Error("Этот способ оплаты скоро будет доступен.");
+      const result = await api("/api/order", { method: "POST", auth: true, body: { cart: [{ id: intent.product.id, qty: 1 }], kind: intent.kind, payment: selectedPayment, comment: "", idempotency_key: intent.key } });
       intent.done = true;
       orderKeys.delete(intent.signature);
       const id = result?.id ?? result?.order_id ?? result?.order?.id;
@@ -857,9 +872,9 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       $("order-support").hidden = false;
       loadCatalog(); loadMe();
     } catch (error) {
-      feedback("order-feedback", message(error) + " Результат отправки не подтверждён. Повтори ту же заявку или уточни её состояние у поддержки; повтор сохраняет ключ заявки.", true);
+      feedback("order-feedback", message(error) + " Повтори попытку после обновления баланса или каталога.", true);
       $("confirm-order").textContent = "Повторить ту же заявку";
-      $("order-support").hidden = false;
+      $("order-support").hidden = true;
       loadCatalog();
     } finally {
       orderBusy = false; dialog.removeAttribute("aria-busy");
@@ -1047,6 +1062,11 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   $("retry-catalog").addEventListener("click", loadCatalog);
   $("refresh-profile").addEventListener("click", loadMe);
   $("confirm-order").addEventListener("click", submitOrder);
+  document.querySelectorAll("[data-payment]").forEach(button => button.addEventListener("click", () => {
+    if (button.dataset.payment !== "balance") { feedback("order-feedback", "Этот способ оплаты скоро будет доступен.", true); return; }
+    selectedPayment = "balance"; document.querySelectorAll("[data-payment]").forEach(item => item.classList.toggle("primary", item === button));
+  }));
+  document.querySelectorAll("[data-topup]").forEach(button => button.addEventListener("click", () => topup(Number(button.dataset.topup))));
   $("cancel-order").addEventListener("click", () => { if (!orderBusy) dialog.close(); });
   dialog.addEventListener("cancel", event => { if (orderBusy) event.preventDefault(); });
   dialog.addEventListener("close", () => {

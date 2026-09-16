@@ -267,6 +267,19 @@ class Store:
                 "favorite_product": favorites.most_common(1)[0][0] if favorites else None,
                 "balance": row["balance"], "preorders": preorders, "is_admin": bool(is_admin)}
 
+    async def add_balance(self, user_id, amount):
+        amount = integer(amount, "Сумма пополнения", 10**6, 1)
+        async with self.connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            row = await (await db.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))).fetchone()
+            if not row:
+                await db.execute("INSERT INTO users(user_id,created_at,balance) VALUES(?,?,?)", (user_id, int(time.time()), amount))
+            else:
+                await db.execute("UPDATE users SET balance=balance+? WHERE user_id=?", (amount, user_id))
+            row = await (await db.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))).fetchone()
+            await db.commit()
+        return int(row["balance"])
+
     async def save_category(self, body, item_id=None):
         name = text(body.get("name"), "Название", 120, True)
         active = flag(body.get("active", True), "Показывать")
@@ -322,6 +335,9 @@ class Store:
         if not isinstance(cart, list) or not 1 <= len(cart) <= 30:
             raise ApiError("Корзина должна содержать от 1 до 30 товаров.")
         kind = body.get("kind", "order")
+        payment = body.get("payment", "manual")
+        if payment not in ("manual", "balance", "crypto", "sbp"):
+            raise ApiError("Неизвестный способ оплаты.")
         if kind not in ("order", "preorder", "test"):
             raise ApiError("Неизвестный тип заявки.")
         key = text(body.get("idempotency_key"), "Ключ заявки", 128, True)
@@ -337,7 +353,7 @@ class Store:
             requested[product_id] = requested.get(product_id, 0) + qty
             if requested[product_id] > 100:
                 raise ApiError("Не более 100 единиц одного товара.")
-        digest = hashlib.sha256(json.dumps([sorted(requested.items()), kind, comment], ensure_ascii=False).encode()).hexdigest()
+        digest = hashlib.sha256(json.dumps([sorted(requested.items()), kind, payment, comment], ensure_ascii=False).encode()).hexdigest()
         async with self.connection() as db:
             await db.execute("BEGIN IMMEDIATE")
             previous = await (await db.execute("SELECT * FROM orders WHERE user_id=? AND idempotency_key=?", (user_id, key))).fetchone()
@@ -374,7 +390,12 @@ class Store:
                 items.append({"id": product_id, "name": product["name"], "price": product["price"], "qty": qty})
             if kind == "test":
                 total = 0
-            status = "done" if kind == "test" else ("preorder" if kind == "preorder" else "new")
+            if kind == "order" and payment == "balance":
+                user_row = await (await db.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))).fetchone()
+                if not user_row or user_row["balance"] < total:
+                    raise ApiError("Недостаточно средств на балансе.", 409)
+                await db.execute("UPDATE users SET balance=balance-? WHERE user_id=?", (total, user_id))
+            status = "done" if kind == "test" else ("preorder" if kind == "preorder" else ("paid" if payment == "balance" else "new"))
             cursor = await db.execute("INSERT INTO orders(user_id,items,total,comment,status,created_at,kind,idempotency_key,request_hash) VALUES(?,?,?,?,?,?,?,?,?)", (user_id, json.dumps(items, ensure_ascii=False), total, comment, status, int(time.time()), kind, key, digest))
             order_id = cursor.lastrowid
             if kind == "test":
@@ -666,7 +687,7 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         return web.json_response((await store.catalog(include_test=include_test))["products"])
 
     async def config(request):
-        return web.json_response({"currency": "RUB", "payment_enabled": False, "support_username": support_username,
+        return web.json_response({"currency": "RUB", "payment_enabled": True, "support_username": support_username,
                                   "images": {"menu": "/static/bg.jpg", "profile": "/static/2.jpg", "support": "/static/shop.jpg"}})
 
     async def me(request):
@@ -674,6 +695,15 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         profile = await store.profile(user, user["id"] in admin_ids)
         profile["is_tester"] = user["id"] in testers or user["id"] in admin_ids
         return web.json_response(profile)
+
+    async def topup(request):
+        user = authenticate(request)
+        payload = await body(request)
+        amount = payload.get("amount")
+        if amount not in (100, 250, 500, 1000, 1500):
+            raise ApiError("Выбери доступную сумму пополнения.")
+        await store.profile(user, user["id"] in admin_ids)
+        return web.json_response({"ok": True, "balance": await store.add_balance(user["id"], amount)})
 
     async def admin_catalog(request):
         authenticate(request, True)
@@ -717,7 +747,7 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
 
     app.add_routes([
         web.get("/api/catalog", catalog), web.get("/api/products", legacy_products),
-        web.get("/api/config", config), web.get("/api/me", me), web.post("/api/order", order),
+        web.get("/api/config", config), web.get("/api/me", me), web.post("/api/wallet/topup", topup), web.post("/api/order", order),
         web.get("/api/admin/catalog", admin_catalog), web.get("/api/admin/orders", orders),
         web.post("/api/admin/categories", categories), web.patch("/api/admin/categories/{id}", categories),
         web.post("/api/admin/products", products), web.patch("/api/admin/products/{id}", products),
