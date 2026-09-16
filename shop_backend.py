@@ -184,17 +184,20 @@ class Store:
                     name TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS orders (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id BIGINT NOT NULL,
                     items TEXT NOT NULL, total INTEGER NOT NULL, comment TEXT DEFAULT '',
                     status TEXT DEFAULT 'new', created_at INTEGER NOT NULL,
                     kind TEXT NOT NULL DEFAULT 'order', idempotency_key TEXT, request_hash TEXT
                 );
                 CREATE TABLE IF NOT EXISTS users (
-                    traveler_no INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL UNIQUE,
+                    traveler_no INTEGER PRIMARY KEY AUTOINCREMENT, user_id BIGINT NOT NULL UNIQUE,
                     first_name TEXT DEFAULT '', username TEXT DEFAULT '', created_at INTEGER NOT NULL,
                     balance INTEGER NOT NULL DEFAULT 0
                 );
             """)
+            if self.database_url:
+                await db.execute("ALTER TABLE users ALTER COLUMN user_id TYPE BIGINT USING user_id::bigint")
+                await db.execute("ALTER TABLE orders ALTER COLUMN user_id TYPE BIGINT USING user_id::bigint")
             migrations = {
                 "products": {
                     "warranty": "TEXT DEFAULT ''",
