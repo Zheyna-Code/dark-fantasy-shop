@@ -347,14 +347,17 @@ async def cmd_add(message: Message):
     add_state.pop(user.id, None)
     upload_state.pop(user.id, None)
     catalog = await store.catalog(admin=True)
-    rows = [
+    rows = [[blue_button(f"📥 Пополнить: {item['name'][:42]}", callback_data=f"upload:{item['id']}")]
+            for item in catalog["products"][:20]]
+    rows.extend([
         [blue_button(CATEGORY_TITLES.get(category["slug"], category["name"])[:50], callback_data=f"add:{category['slug']}")]
         for category in catalog["categories"] if category.get("active")
-    ] or [[blue_button("ChatGPT", callback_data="add:chatgpt")], [blue_button("Gemini", callback_data="add:gemini")]]
+    ] or [[blue_button("ChatGPT", callback_data="add:chatgpt")], [blue_button("Gemini", callback_data="add:gemini")]])
     rows.append([styled_button("Отмена", "danger", callback_data="add:cancel")])
     await message.answer(
-        "<b>➕ Добавление товара</b>\n\nШаг 1. Выбери категорию полки — "
-        "потом выбери тип товара и заполни карточку.",
+        "<b>➕ Управление товарами</b>\n\n"
+        "Выбери существующий товар для загрузки автовыдачи "
+        "или категорию для создания нового товара.",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
