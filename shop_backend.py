@@ -452,8 +452,15 @@ class Store:
                 for product_id, qty, rows in allocation:
                     await db.execute("UPDATE products SET stock=stock-? WHERE id=?", (qty, product_id))
                     await db.execute("UPDATE deliveries SET status='issued', order_id=? WHERE id IN (" + ",".join("?" * len(rows)) + ")", (order_id, *[row["id"] for row in rows]))
+            issued = []
+            if kind == "order" and payment == "balance":
+                issued = await self._try_fulfill(db, await (await db.execute("SELECT * FROM orders WHERE id=?", (order_id,))).fetchone())
+                if issued:
+                    await db.execute("UPDATE orders SET status='done' WHERE id=?", (order_id,))
             await db.commit()
             result = {"ok": True, "order_id": order_id, "total": total, "replayed": False}
+            if issued:
+                result["issued"] = issued
             if kind == "test":
                 names = {item["id"]: item["name"] for item in items}
                 result["test"] = True

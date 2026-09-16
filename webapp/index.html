@@ -675,7 +675,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       });
       card.append(favorite);
       const kind = orderKind(product);
-      const label = product.price <= 0 ? "Цена не задана" : !kind ? (product.is_test ? "🧪 Тестовый товар" : "Нет в наличии") : !initData() ? "Войди через Telegram" : !me ? "Подтверди вход" : !catalogReady ? "Обнови каталог" : kind === "test" ? "🧪 Тест-покупка (без оплаты)" : "Оформить заказ";
+      const label = product.price <= 0 ? "Цена не задана" : !kind ? (product.is_test ? "🧪 Тестовый товар" : "Нет в наличии") : !initData() ? "Войди через Telegram" : !me ? "Подтверди вход" : !catalogReady ? "Обнови каталог" : kind === "test" ? "🧪 Купить без оплаты" : "Купить";
       const control = button(label, () => { if (performance.now() >= suppressClickUntil) openOrder(product.id); });
       control.classList.add("primary");
       card.append(control);
@@ -908,6 +908,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       const id = result?.id ?? result?.order_id ?? result?.order?.id;
       feedback("order-feedback", intent.kind === "test"
         ? `Тестовая покупка${id != null ? " № " + String(id) : ""} выполнена. Бот отправил товар тебе в чат.`
+        : result.issued ? `Заказ${id != null ? " № " + String(id) : ""} оплачен и выдан. Проверь сообщение от бота.`
         : `Заказ${id != null ? " № " + String(id) : ""} оплачен с баланса.`);
       $("confirm-order").hidden = true;
       $("cancel-order").textContent = "Закрыть";

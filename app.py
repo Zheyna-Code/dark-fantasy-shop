@@ -511,7 +511,7 @@ async def upload_wizard(message: Message):
     parts.append(f"🟢 Выставлено на полку: {result['stock_added']}")
     parts.append("Теперь кнопка покупки в карточке выдаёт эти строки автоматически.")
     await message.answer("\n".join(parts), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-        blue_button("Сразу открыть карточку товара", callback_data=f"product:{state['product_id']}")
+        blue_button("Купить товар", callback_data=f"buy:{state['product_id']}")
     ]]))
     if state.get("message") is not None:
         slug = last_shelf.get(user.id)
@@ -760,7 +760,10 @@ async def payment_callback(callback: CallbackQuery):
         await callback.answer(error.message, show_alert=True)
         return
     await callback.answer("Заказ оплачен с баланса")
-    await replace_message(callback.message, f"<b>Заказ № {result['order_id']} оформлен</b>\n\nСписано: <b>{result['total']:,} ₽</b>. Заказ передан на выдачу.", back_keyboard())
+    if result.get("issued"):
+        await replace_message(callback.message, issued_message(result["issued"][0], f"📦 Покупка № {result['order_id']} оплачена и выдана"))
+    else:
+        await replace_message(callback.message, f"<b>Заказ № {result['order_id']} оформлен</b>\n\nСписано: <b>{result['total']:,} ₽</b>. Товар будет выдан автоматически после пополнения.", back_keyboard())
 
 
 @dp.callback_query(F.data.startswith("preorder:"))
