@@ -57,7 +57,10 @@ class _PgConnection:
         if ignore_conflicts:
             query += " ON CONFLICT DO NOTHING"
         is_insert = query.lstrip().upper().startswith("INSERT")
-        if is_insert and "RETURNING" not in query.upper() and re.search(r"\bINTO\s+\w+", query, re.I):
+        # Store only reads generated ids from these tables. Users use
+        # traveler_no as their primary key and do not need a RETURNING clause.
+        needs_id = bool(re.search(r"\bINTO\s+(products|categories|orders)\b", query, re.I))
+        if is_insert and needs_id and "RETURNING" not in query.upper():
             query += " RETURNING id"
         if query.lstrip().upper().startswith(("SELECT", "WITH")) or " RETURNING " in query.upper():
             rows = await self.conn.fetch(query, *params)
