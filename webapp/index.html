@@ -357,7 +357,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <p class="eyebrow">Кошель странника</p><h1 id="wallet-title" tabindex="-1">Кошелёк</h1>
       <p>Баланс</p><p class="wallet-balance" id="wallet-balance">—</p>
       <p id="wallet-login">Баланс доступен после входа через Telegram.</p>
-      <p id="payment-note">Выбери сумму пополнения баланса:</p>
+      <p id="payment-note">Выбери сумму, затем способ оплаты: СБП или крипта.</p>
       <div class="form-actions" id="topup-actions">
         <button class="action" type="button" data-topup="100">100 ₽</button><button class="action" type="button" data-topup="250">250 ₽</button><button class="action" type="button" data-topup="500">500 ₽</button><button class="action" type="button" data-topup="1000">1000 ₽</button><button class="action" type="button" data-topup="1500">1500 ₽</button>
       </div>
@@ -581,7 +581,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     if (!product || !product.active || !integer(product.price) || product.price <= 0) return null;
     if (product.is_test) return me && me.is_tester && product.stock > 0 ? "test" : null;
     if (product.stock > 0) return "order";
-    return "preorder";
+    return null;
   }
   function positionTrack() {
     const card = track.firstElementChild;
@@ -661,10 +661,10 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       const footer = node("div", "card-footer");
       footer.append(node("span", product.stock > 0 ? "in-stock" : "out-of-stock", stockText(product.stock)));
       if (product.is_test) footer.append(node("span", "test-badge", "🧪 Тестовая выдача"));
-      else if (product.stock === 0) footer.append(node("span", "", "Предзаказ · предоплата 100%"));
+      else if (product.stock === 0) footer.append(node("span", "", "Нет в наличии"));
       card.append(footer);
       const kind = orderKind(product);
-      const label = product.price <= 0 ? "Цена не задана" : !kind ? (product.is_test ? "🧪 Тестовый товар" : "Нет в наличии") : !initData() ? "Войди через Telegram" : !me ? "Подтверди вход" : !catalogReady ? "Обнови каталог" : kind === "preorder" ? "Предзаказать" : kind === "test" ? "🧪 Тест-покупка (без оплаты)" : "Оформить заказ";
+      const label = product.price <= 0 ? "Цена не задана" : !kind ? (product.is_test ? "🧪 Тестовый товар" : "Нет в наличии") : !initData() ? "Войди через Telegram" : !me ? "Подтверди вход" : !catalogReady ? "Обнови каталог" : kind === "test" ? "🧪 Тест-покупка (без оплаты)" : "Оформить заказ";
       const control = button(label, () => { if (performance.now() >= suppressClickUntil) openOrder(product.id); });
       control.classList.add("primary");
       card.append(control);
@@ -749,7 +749,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     $("profile-stats").replaceChildren();
     if (authenticated) {
       const favorite = typeof me.favorite_product === "object" && me.favorite_product ? me.favorite_product.name : me.favorite_product;
-      const stats = [["Номер странника", me.traveler_no ?? "—"], ["Покупки", me.purchases ?? "—"], ["Предзаказы", me.preorders ?? "—"], ["Потрачено", integer(me.spent) ? money(me.spent) : "—"], ["Любимый товар", favorite || "Пока нет"], ["Баланс", integer(me.balance) ? money(me.balance) : "—"]];
+      const stats = [["Номер странника", me.traveler_no ?? "—"], ["Покупки", me.purchases ?? "—"], ["Потрачено", integer(me.spent) ? money(me.spent) : "—"], ["Любимый товар", favorite || "Пока нет"], ["Баланс", integer(me.balance) ? money(me.balance) : "—"]];
       stats.forEach(([label, value]) => { const row = node("div"); row.append(node("dt", "", label), node("dd", "", value)); $("profile-stats").append(row); });
     }
     if (!isAdmin()) {
@@ -786,9 +786,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   async function topup(amount) {
     if (!me || !initData()) return;
     document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = true; });
-    try { const data = await api("/api/wallet/topup", { method: "POST", auth: true, body: { amount } }); me.balance = data.balance; renderSession(); feedback("wallet-feedback", `Баланс пополнен на ${money(amount)}.`); }
-    catch (error) { feedback("wallet-feedback", message(error), true); }
-    finally { document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = false; }); }
+    feedback("wallet-feedback", `Пополнение ${money(amount)}: СБП и крипта пока недоступны. Ожидайте, скоро будет доступно.`, true);
+    document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = false; });
   }
   function setView(view, focus = true) {
     if (!["catalog", "profile", "wallet", "support", "admin"].includes(view) || (view === "admin" && !isAdmin())) return;
@@ -823,11 +822,9 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       orderIntent.signature = signature;
       orderIntent.done = false;
       selectedPayment = kind === "order" ? "balance" : "manual";
-      $("order-title").textContent = kind === "preorder" ? "Подтверждение предзаказа" : kind === "test" ? "Тестовая покупка" : "Подтверждение заказа";
-      $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "preorder" ? "\nСейчас нет в наличии. Предзаказ по предоплате 100%." : kind === "test" ? "\nТестовый режим: оплата не требуется." : ""}`;
-      $("order-explanation").textContent = kind === "preorder"
-        ? "Предзаказ действует по предоплате 100%: внеси полную сумму хранителю лавки. Когда товар поступит, бот сначала выдаст оплаченные предзаказы по очереди и отправит товар в чат. Сейчас деньги не списываются."
-        : kind === "test"
+      $("order-title").textContent = kind === "test" ? "Тестовая покупка" : "Оплата заказа";
+      $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "test" ? "\nТестовый режим: оплата не требуется." : ""}`;
+      $("order-explanation").textContent = kind === "test"
         ? "Тестовая покупка без оплаты: после подтверждения бот автоматически отправит товар в чат. Так тестеры проверяют автовыдачу."
         : "Выбери способ оплаты: баланс доступен сейчас, крипта и СБП появятся позже.";
       $("payment-methods").hidden = kind !== "order";
@@ -856,7 +853,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     orderBusy = true;
     $("confirm-order").disabled = true; $("cancel-order").disabled = true;
     dialog.setAttribute("aria-busy", "true");
-    feedback("order-feedback", "Отправляем заявку…");
+    feedback("order-feedback", "Проводим оплату…");
     intent.attempted = true;
     try {
       if (intent.kind === "order" && selectedPayment !== "balance") throw new Error("Этот способ оплаты скоро будет доступен.");
@@ -866,10 +863,10 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       const id = result?.id ?? result?.order_id ?? result?.order?.id;
       feedback("order-feedback", intent.kind === "test"
         ? `Тестовая покупка${id != null ? " № " + String(id) : ""} выполнена. Бот отправил товар тебе в чат.`
-        : `Заявка${id != null ? " № " + String(id) : ""} принята. Оплата не производилась. Свяжись с поддержкой для оплаты и получения товара.`);
+        : `Заказ${id != null ? " № " + String(id) : ""} оплачен с баланса.`);
       $("confirm-order").hidden = true;
       $("cancel-order").textContent = "Закрыть";
-      $("order-support").hidden = false;
+      $("order-support").hidden = true;
       loadCatalog(); loadMe();
     } catch (error) {
       feedback("order-feedback", message(error) + " Повтори попытку после обновления баланса или каталога.", true);

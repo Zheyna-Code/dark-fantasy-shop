@@ -141,6 +141,12 @@ def wallet_keyboard():
         [blue_button("В меню", callback_data="menu:home")],
     ])
 
+def wallet_methods_keyboard(amount):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button(f"СБП · {amount} ₽", callback_data=f"walletpay:{amount}:sbp"), blue_button(f"Крипта · {amount} ₽", callback_data=f"walletpay:{amount}:crypto")],
+        [blue_button("Назад к суммам", callback_data="menu:wallet")],
+    ])
+
 
 async def replace_message(message, text, reply_markup=None):
     """Edit callback message in place; fall back to a new message for commands."""
@@ -162,7 +168,6 @@ def cancel_keyboard():
 def categories_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button(title, callback_data="category:" + slug) for slug, title in CATEGORY_TITLES.items()],
-        [plain_button("⏳ Предзаказы", callback_data="preorders")],
         [blue_button("В меню", callback_data="menu:home")],
     ])
 
@@ -194,8 +199,7 @@ def category_caption(slug, items):
     lines = [
         f"<b>Полка {CATEGORY_TITLES[slug]}</b>", "",
         "Выбирай товар, путник: <b>зелёная</b> кнопка — товар в наличии, <b>красная</b> — кончился. "
-        "Если в карточке доступен предзаказ, его можно оформить с предоплатой 100% — "
-        "при поступлении бот выдаст предзаказы первыми, раньше полки.", "",
+        "Оплата доступна с баланса; крипта и СБП появятся позже.", "",
         "Перед покупкой обязательно открой карточку: там указаны цена, наличие и гарантия.",
     ]
     if not items:
@@ -228,7 +232,7 @@ def product_caption(item):
     elif stock > 0:
         availability = f"🟢 В наличии: {stock}"
     elif stock == 0 and type(item.get("price")) is int and item["price"] > 0:
-        availability = "🔴 Нет в наличии · предзаказ по предоплате 100%"
+        availability = "🔴 Нет в наличии"
     else:
         availability = "🔴 Нет в наличии"
     description = escape(item.get("description") or "Описание уточняется у хранителя.")
@@ -242,7 +246,7 @@ def product_caption(item):
         f"<b>Цена:</b> {price}\n"
         f"<b>Наличие:</b> {availability}\n"
         f"<b>Гарантия:</b> {warranty}{note}\n\n"
-        "Внимательно проверь условия гарантии перед оформлением заявки."
+        "Внимательно проверь условия гарантии перед покупкой."
     )
 
 
@@ -254,9 +258,6 @@ def product_keyboard(item, can_test=False, is_admin=False):
             rows.append([styled_button("🧪 Тестовая покупка без оплаты", "success", callback_data=f"buy:{item['id']}")])
     elif stock > 0:
         rows.append([styled_button("Купить", "success", callback_data=f"buy:{item['id']}")])
-    elif stock == 0 and type(item.get("price")) is int and item["price"] > 0:
-        # Предзаказ — без цвета: он не покупка, а заявка на поступление.
-        rows.append([plain_button("⏳ Предзаказ · предоплата 100%", callback_data=f"preorder:{item['id']}")])
     if is_admin:
         rows.append([blue_button("📤 Загрузить автовыдачу", callback_data=f"upload:{item['id']}")])
     rows.append([styled_button("Назад", "danger", callback_data=f"category:{item['category']}")])
@@ -579,9 +580,13 @@ async def wallet_topup_callback(callback: CallbackQuery):
         await callback.answer("Недоступная сумма.", show_alert=True)
         return
     amount = int(value)
-    balance = await store.add_balance(callback.from_user.id, amount)
-    await callback.answer(f"Баланс пополнен на {amount} ₽")
-    await replace_message(callback.message, f"<b>Кошелёк странника</b>\n\nБаланс: <b>{balance:,} ₽</b>\n\nВыбери сумму пополнения:", wallet_keyboard())
+    await callback.answer()
+    await replace_message(callback.message, f"<b>Пополнение баланса · {amount} ₽</b>\n\nВыбери способ оплаты:", wallet_methods_keyboard(amount))
+
+
+@dp.callback_query(F.data.startswith("walletpay:"))
+async def wallet_payment_callback(callback: CallbackQuery):
+    await callback.answer("Ожидайте, способ оплаты скоро будет доступен.", show_alert=True)
 
 
 @dp.callback_query(F.data.startswith("category:"))

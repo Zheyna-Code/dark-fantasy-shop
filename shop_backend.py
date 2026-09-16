@@ -338,8 +338,10 @@ class Store:
         payment = body.get("payment", "manual")
         if payment not in ("manual", "balance", "crypto", "sbp"):
             raise ApiError("Неизвестный способ оплаты.")
-        if kind not in ("order", "preorder", "test"):
+        if kind not in ("order", "test"):
             raise ApiError("Неизвестный тип заявки.")
+        if kind == "order" and payment != "balance":
+            raise ApiError("Этот способ оплаты скоро будет доступен.", 409)
         key = text(body.get("idempotency_key"), "Ключ заявки", 128, True)
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", key):
             raise ApiError("Неверный ключ заявки.")
@@ -379,9 +381,6 @@ class Store:
                     if len(rows) < qty:
                         raise ApiError("Сначала загрузи автовыдачу для тестового товара.", 409)
                     allocation.append((product_id, qty, rows))
-                elif kind == "preorder":
-                    if product["stock"] != 0:
-                        raise ApiError("Предзаказ этого товара сейчас недоступен.", 409)
                 elif product["stock"] < qty:
                     raise ApiError("Недостаточно товара. Обнови каталог.", 409)
                 else:
@@ -703,7 +702,7 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         if amount not in (100, 250, 500, 1000, 1500):
             raise ApiError("Выбери доступную сумму пополнения.")
         await store.profile(user, user["id"] in admin_ids)
-        return web.json_response({"ok": True, "balance": await store.add_balance(user["id"], amount)})
+        raise ApiError("Пополнение через СБП и крипту скоро будет доступно.", 409)
 
     async def admin_catalog(request):
         authenticate(request, True)
