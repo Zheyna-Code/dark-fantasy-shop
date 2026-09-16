@@ -56,10 +56,10 @@ SHOP_CAPTION = (
     "<b>Ты попал в Лавку Странника</b>\n\n"
     "За каменными стенами мерцают магические артефакты нового века — нейросети. "
     "В нашей лавке ты найдёшь цифровых помощников для идей, работы и творчества.\n\n"
-    "Выбери свою магию: <b>ChatGPT</b> или <b>Gemini</b>."
+    "Выбери свою магию: <b>ChatGPT</b>, <b>CapCut</b> или <b>Gemini</b>."
 )
-CATEGORY_TITLES = {"chatgpt": "ChatGPT", "gemini": "Gemini"}
-CATEGORY_PHOTOS = {"chatgpt": "chatgptshop.jpg", "gemini": "geminishop.jpg"}
+CATEGORY_TITLES = {"chatgpt": "ChatGPT", "capcut": "CapCut", "gemini": "Gemini"}
+CATEGORY_PHOTOS = {"chatgpt": "chatgptshop.jpg", "capcut": "Capcutshop.jpg", "gemini": "geminishop.jpg"}
 ADD_STEPS = ("name", "price", "stock", "description")
 ADD_PROMPTS = {
     "type": "Шаг 1 из 5. Это тестовый товар? Тестовый покупают тестеры без оплаты — чтобы проверить автовыдачу.",

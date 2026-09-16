@@ -123,7 +123,7 @@ class Store:
                     if name not in columns:
                         await db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
             await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS order_retry ON orders(user_id,idempotency_key) WHERE idempotency_key IS NOT NULL")
-            for slug, name in (("chatgpt", "ChatGPT"), ("gemini", "Gemini")):
+            for slug, name in (("chatgpt", "ChatGPT"), ("gemini", "Gemini"), ("capcut", "CapCut")):
                 await db.execute("INSERT INTO categories(slug,name) SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM categories WHERE slug=?)", (slug, name, slug))
             # Preserve old demo records, but do not sell candles/relics in the AI shop.
             await db.execute("INSERT OR IGNORE INTO categories(slug,name,active) SELECT DISTINCT category,category,0 FROM products WHERE category IS NOT NULL")
