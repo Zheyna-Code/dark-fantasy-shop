@@ -101,9 +101,9 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid #f8ce87; out
   background: #efc387;
   transform: rotate(45deg);
 }
-.btn-chatgpt { left: 10%; }
-.btn-capcut { left: 38%; }
-.btn-gemini { right: 14%; }
+.btn-chatgpt { left: 8%; }
+.btn-capcut { left: 29%; }
+.btn-gemini { right: 16%; }
 .shop-content {
   position: relative;
   margin-top: -9px;
@@ -315,7 +315,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
           <img src="/static/gpt_user_v2.png" alt="" width="68" height="68"><span>ChatGPT<small class="stock-label">Нет в наличии</small></span>
         </button>
         <button class="pixel-btn btn-capcut" type="button" data-provider="capcut" data-stock="empty" aria-label="Показать товары CapCut" aria-pressed="false" aria-controls="catalog">
-          <img src="/static/Capcut.jpg" alt="" width="68" height="68"><span>CapCut<small class="stock-label">Нет в наличии</small></span>
+          <img src="/static/Capcut.png" alt="" width="68" height="68"><span>CapCut<small class="stock-label">Нет в наличии</small></span>
         </button>
         <button class="pixel-btn btn-gemini" type="button" data-provider="gemini" data-stock="empty" aria-label="Показать товары Gemini" aria-pressed="false" aria-controls="catalog">
           <img src="/static/gemini_user_v2.png" alt="" width="68" height="68"><span>Gemini<small class="stock-label">Нет в наличии</small></span>
@@ -425,7 +425,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   const $ = id => document.getElementById(id);
   const providers = new Map([
     ["chatgpt", { name: "ChatGPT", icon: "/static/gpt_user_v2.png" }],
-    ["capcut", { name: "CapCut", icon: "/static/Capcut.jpg" }],
+    ["capcut", { name: "CapCut", icon: "/static/Capcut.png" }],
     ["gemini", { name: "Gemini", icon: "/static/gemini_user_v2.png" }]
   ]);
   const catalog = $("catalog"), viewport = $("carousel"), track = $("carousel-track");
