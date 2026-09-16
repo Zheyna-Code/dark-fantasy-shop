@@ -54,9 +54,7 @@ MENU_CAPTION = (
 )
 SHOP_CAPTION = (
     "<b>Ты попал в Лавку Странника</b>\n\n"
-    "За каменными стенами мерцают магические артефакты нового века — нейросети. "
-    "В нашей лавке ты найдёшь цифровых помощников для идей, работы и творчества.\n\n"
-    "Выбери свою магию: <b>ChatGPT</b>, <b>CapCut</b> или <b>Gemini</b>."
+    "Выбери свою магию."
 )
 CATEGORY_TITLES = {"chatgpt": "ChatGPT", "capcut": "CapCut", "gemini": "Gemini"}
 CATEGORY_PHOTOS = {"chatgpt": "chatgptshop.jpg", "capcut": "Capcutshop.jpg", "gemini": "geminishop.jpg"}
@@ -196,7 +194,7 @@ def product_caption(item):
         availability = f"🧪 Тестовый товар · единиц для выдачи: {stock}"
     elif stock > 0:
         availability = f"🟢 В наличии: {stock}"
-    elif item.get("allow_preorder"):
+    elif stock == 0 and type(item.get("price")) is int and item["price"] > 0:
         availability = "🔴 Нет в наличии · предзаказ по предоплате 100%"
     else:
         availability = "🔴 Нет в наличии"
@@ -223,7 +221,7 @@ def product_keyboard(item, can_test=False, is_admin=False):
             rows.append([styled_button("🧪 Тестовая покупка без оплаты", "success", callback_data=f"buy:{item['id']}")])
     elif stock > 0:
         rows.append([styled_button("Купить", "success", callback_data=f"buy:{item['id']}")])
-    elif item.get("allow_preorder"):
+    elif stock == 0 and type(item.get("price")) is int and item["price"] > 0:
         # Предзаказ — без цвета: он не покупка, а заявка на поступление.
         rows.append([plain_button("⏳ Предзаказ · предоплата 100%", callback_data=f"preorder:{item['id']}")])
     if is_admin:
@@ -566,22 +564,39 @@ async def preorders_callback(callback: CallbackQuery):
     add_state.pop(callback.from_user.id, None)
     upload_state.pop(callback.from_user.id, None)
     catalog = await store.catalog()
-    items = [
-        product for product in catalog["products"]
-        if product.get("allow_preorder") and not product.get("is_test")
-        and (product["stock"] if type(product["stock"]) is int else 0) == 0
-    ]
+    items = [product for product in catalog["products"]
+             if not product.get("is_test") and type(product.get("price")) is int and product["price"] > 0
+             and (product["stock"] if type(product["stock"]) is int else 0) == 0]
+    personal = await store.user_preorders(callback.from_user.id)
     lines = [
         "<b>⏳ Полка предзаказов</b>", "",
-        "Эти товары скоро появятся в лавке. Предзаказ действует по <b>предоплате 100%</b>: "
+        "Предзаказ действует по <b>предоплате 100%</b>: "
         "внеси полную сумму хранителю, и при поступлении бот выдаст оплаченные предзаказы "
         "первыми — раньше, чем остаток попадёт на полку.", "",
     ]
-    if not items:
-        lines.append("Сейчас предзаказ оформить нельзя: все товары либо в наличии, либо без предзаказа.")
-    rows = [[styled_button(item["name"][:50], "danger", callback_data=f"product:{item['id']}")] for item in items[:12]]
-    if len(items) > 12:
-        lines.append(f"… и ещё {len(items) - 12}: смотри мини-лавку.")
+    if personal:
+        lines.extend(["<b>Твои предзаказы</b>", ""])
+        for order in personal[:12]:
+            status = "оплачен, ждёт выдачи" if order["status"] == "paid" else "ждёт предоплату"
+            names = ", ".join(str(item.get("name", "Товар")) for item in order["items"]) or "Товар"
+            lines.append(f"⏳ Заказ № {order['id']} · {escape(names)} — {status}")
+    personal_items = []
+    personal_ids = set()
+    for order in personal:
+        for item in order["items"]:
+            product_id = item.get("id")
+            if product_id not in personal_ids:
+                personal_ids.add(product_id)
+                personal_items.append({"id": product_id, "name": item.get("name", "Товар")})
+    available = [item for item in items if item["id"] not in personal_ids]
+    if available:
+        lines.extend(["<b>Можно оформить сейчас</b>", ""])
+    visible_items = personal_items + available
+    rows = [[styled_button(item["name"][:50], "danger", callback_data=f"product:{item['id']}")] for item in visible_items[:12]]
+    if not personal and not available:
+        lines.append("Сейчас нет активных предзаказов и товаров, доступных для предзаказа.")
+    if len(visible_items) > 12:
+        lines.append(f"… и ещё {len(visible_items) - 12}: смотри мини-лавку.")
     rows.append([styled_button("Назад", "danger", callback_data="menu:products")])
     await send_photo(callback.message, "shop.jpg", "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows))
 
@@ -663,7 +678,7 @@ async def preorder_callback(callback: CallbackQuery):
     if not item or not item["active"] or item.get("is_test"):
         await callback.answer("Товар больше не найден.", show_alert=True)
         return
-    if item["stock"] > 0 or not item.get("allow_preorder"):
+    if item["stock"] > 0:
         await callback.answer("Предзаказ недоступен: товар уже есть в наличии.", show_alert=True)
         return
     existing = await store.active_preorder(user.id, item["id"])

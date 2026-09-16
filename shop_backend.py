@@ -161,7 +161,7 @@ class Store:
         for order in orders:
             if order["kind"] == "test":
                 continue
-            if order["status"] == "preorder":
+            if order["status"] in ("preorder", "paid") and order["kind"] == "preorder":
                 preorders += 1
             if order["status"] not in ("paid", "done"):
                 continue
@@ -276,7 +276,7 @@ class Store:
                         raise ApiError("Сначала загрузи автовыдачу для тестового товара.", 409)
                     allocation.append((product_id, qty, rows))
                 elif kind == "preorder":
-                    if product["stock"] != 0 or not product["allow_preorder"]:
+                    if product["stock"] != 0:
                         raise ApiError("Предзаказ этого товара сейчас недоступен.", 409)
                 elif product["stock"] < qty:
                     raise ApiError("Недостаточно товара. Обнови каталог.", 409)
@@ -322,6 +322,24 @@ class Store:
             if any(isinstance(item, dict) and item.get("id") == product_id for item in items):
                 return {"id": row["id"], "status": row["status"]}
         return None
+
+    async def user_preorders(self, user_id):
+        """Return this user's still-open preorders for the bot shelf."""
+        async with self.connection() as db:
+            rows = await (await db.execute(
+                "SELECT id,items,total,status,created_at FROM orders "
+                "WHERE user_id=? AND kind='preorder' AND status IN ('preorder','paid') ORDER BY id DESC",
+                (user_id,),
+            )).fetchall()
+        result = []
+        for row in rows:
+            try:
+                items = json.loads(row["items"])
+            except (ValueError, TypeError):
+                items = []
+            result.append({"id": row["id"], "items": items, "total": row["total"], "status": row["status"],
+                           "created_at": row["created_at"]})
+        return result
 
     async def create_test_order(self, user_id, product_id, qty=1):
         """Покупка тестового товара без оплаты: заказ сразу выполнен, строка автовыдачи выдана."""
@@ -428,7 +446,8 @@ class Store:
             if not any(item.get("id") == product_id for item in items):
                 continue
             if not await self._in_stock(db, items):
-                continue
+                # Do not let a later preorder jump ahead of an earlier one.
+                break
             event = await self._try_fulfill(db, order)
             if not event:
                 continue

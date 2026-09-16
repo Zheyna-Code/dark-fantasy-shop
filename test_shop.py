@@ -68,7 +68,7 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.get(path)
             self.assertEqual(response.status, 200, path)
         catalog = await (await self.client.get("/api/catalog")).json()
-        self.assertEqual([c["slug"] for c in catalog["categories"]], ["chatgpt", "gemini"])
+        self.assertEqual([c["slug"] for c in catalog["categories"]], ["chatgpt", "gemini", "capcut"])
         self.assertEqual(catalog["products"], [])
         html = await (await self.client.get("/")).text()
         self.assertNotIn('<nav class="main-nav"', html)
@@ -142,7 +142,7 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.store.catalog())["products"][0]["stock"], 1)
 
     async def test_preorder_never_restocks(self):
-        product_id = await self.product(stock=0, allow_preorder=True)
+        product_id = await self.product(stock=0)
         order = await self.store.create_order(USER, self.order(product_id, kind="preorder"))
         self.assertEqual((await self.store.profile({"id": USER}))["preorders"], 1)
         await self.store.change_order(order["order_id"], "cancelled")
@@ -150,7 +150,7 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_preorder_prepay_queue_priority(self):
         """Предзаказ с предоплатой 100%: поступивший товар сначала уходит оплаченным предзаказам."""
-        product_id = await self.product(stock=0, allow_preorder=True)
+        product_id = await self.product(stock=0)
         order = await self.store.create_order(USER, self.order(product_id, kind="preorder", key="pre-key-1"))
         paid = await self.store.change_order(order["order_id"], "paid")
         self.assertEqual(paid["status"], "paid")  # товара ещё нет — просто ждёт в очереди
@@ -167,13 +167,27 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.store.catalog())["products"][0]["stock"], 1)
 
     async def test_paid_preorder_fulfilled_on_payment_when_stocked(self):
-        product_id = await self.product(stock=0, allow_preorder=True)
+        product_id = await self.product(stock=0)
         order = await self.store.create_order(USER, self.order(product_id, kind="preorder", key="pre-key-2"))
         await self.store.add_deliveries(product_id, {"items": ["early-1"]})
         result = await self.store.change_order(order["order_id"], "paid")
         self.assertEqual(result["status"], "done")
         self.assertEqual(result["issued"][0]["items"][0]["payloads"], ["early-1"])
         self.assertEqual((await self.store.catalog())["products"][0]["stock"], 0)
+
+    async def test_preorder_queue_does_not_skip_earlier_large_order(self):
+        product_id = await self.product(stock=0)
+        first = await self.store.create_order(USER, self.order(product_id, key="fifo-first", qty=2, kind="preorder"))
+        second = await self.store.create_order(ADMIN, self.order(product_id, key="fifo-second", qty=1, kind="preorder"))
+        await self.store.change_order(first["order_id"], "paid")
+        await self.store.change_order(second["order_id"], "paid")
+        await self.store.add_deliveries(product_id, {"items": ["one"]})
+        orders = (await self.store.orders())["orders"]
+        self.assertEqual({item["id"]: item["status"] for item in orders}, {first["order_id"]: "paid", second["order_id"]: "paid"})
+        await self.store.add_deliveries(product_id, {"items": ["two"]})
+        orders = (await self.store.orders())["orders"]
+        self.assertEqual(next(item["status"] for item in orders if item["id"] == first["order_id"]), "done")
+        self.assertEqual(next(item["status"] for item in orders if item["id"] == second["order_id"]), "paid")
 
     async def test_paid_order_auto_issue(self):
         product_id = await self.product(stock=0)
@@ -235,7 +249,7 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(("Купить", "success"), pairs)
         pairs = styles(shop.product_keyboard(item, can_test=False))
         self.assertFalse(any("Тестовая покупка" in text for text, _ in pairs))
-        plain_id = await self.product(stock=0, allow_preorder=True)
+        plain_id = await self.product(stock=0)
         item = await self.store.product(plain_id)
         pairs = styles(shop.product_keyboard(item))
         self.assertIn(("⏳ Предзаказ · предоплата 100%", None), pairs)  # предзаказ без цвета
@@ -266,7 +280,7 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stranger.answer.call_args.kwargs.get("show_alert"))
 
     async def test_bot_preorder_button_creates_order(self):
-        plain_id = await self.product(stock=0, allow_preorder=True)
+        plain_id = await self.product(stock=0)
         callback = AsyncMock()
         callback.message = AsyncMock()
         callback.from_user = User(id=USER, is_bot=False, first_name="Tester")
@@ -277,6 +291,13 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("предоплате 100%", text)
         profile = await self.store.profile({"id": USER})
         self.assertEqual(profile["preorders"], 1)
+        shelf = AsyncMock()
+        shelf.photo = None
+        shelf_callback = AsyncMock()
+        shelf_callback.message, shelf_callback.from_user, shelf_callback.data = shelf, callback.from_user, "preorders"
+        await shop.preorders_callback(shelf_callback)
+        self.assertIn("Твои предзаказы", shelf.answer_photo.call_args.kwargs["caption"])
+        self.assertIn("Заказ №", shelf.answer_photo.call_args.kwargs["caption"])
         # повторный предзаказ не создаёт дубликат
         again = AsyncMock()
         again.message = AsyncMock()
@@ -288,7 +309,7 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(profile["preorders"], 1)
 
     async def test_bot_upload_wizard_and_auto_issue(self):
-        product_id = await self.product(stock=0, allow_preorder=True)
+        product_id = await self.product(stock=0)
         order = await self.store.create_order(USER, self.order(product_id, kind="preorder", key="up-key-1"))
         await self.store.change_order(order["order_id"], "paid")
         user = User(id=ADMIN, is_bot=False, first_name="Owner")
@@ -372,8 +393,8 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(menu["inline_keyboard"][1][0]["text"], "🏪 Лавка Странника")
         self.assertIn("web_app", menu["inline_keyboard"][1][0])
         categories = shop.categories_keyboard().inline_keyboard[0]
-        self.assertEqual([button.text for button in categories], ["ChatGPT", "Gemini"])
-        self.assertEqual([button.callback_data for button in categories], ["category:chatgpt", "category:gemini"])
+        self.assertEqual([button.text for button in categories], ["ChatGPT", "CapCut", "Gemini"])
+        self.assertEqual([button.callback_data for button in categories], ["category:chatgpt", "category:capcut", "category:gemini"])
         self.assertTrue(all(button.web_app is None for button in categories))
         with patch.object(shop, "WEBAPP_URL", ""):
             self.assertEqual(shop.menu_keyboard().inline_keyboard[1][0].callback_data, "menu:shop")
@@ -465,7 +486,7 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(str(gemini.answer_photo.call_args.args[0].path).endswith("geminishop.jpg"))
 
     async def test_preorder_shelf_and_categories_button(self):
-        plain_id = await self.product(stock=0, allow_preorder=True)
+        plain_id = await self.product(stock=0)
         await self.product(stock=1)  # в наличии — на полку предзаказов не попадает
         keyboard = shop.categories_keyboard().inline_keyboard
         preorders_button = next(button for row in keyboard for button in row if button.callback_data == "preorders")
