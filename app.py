@@ -149,7 +149,7 @@ def wallet_methods_keyboard(amount):
 
 
 async def replace_message(message, text, reply_markup=None):
-    """Edit callback message in place; fall back to a new message for commands."""
+    """Edit the current Telegram message in place whenever Telegram permits it."""
     try:
         if getattr(message, "photo", None):
             await message.edit_caption(caption=text, parse_mode="HTML", reply_markup=reply_markup)
@@ -158,6 +158,14 @@ async def replace_message(message, text, reply_markup=None):
         return
     except Exception:
         pass
+    # A callback message can occasionally be non-editable (old/deleted message).
+    # Keep the fallback for command-originated messages, but never duplicate a
+    # still-existing callback message just because its content type changed.
+    if getattr(message, "edit_text", None) is not None and getattr(message, "chat", None):
+        try:
+            await message.delete()
+        except Exception:
+            pass
     await message.answer(text, parse_mode="HTML", reply_markup=reply_markup)
 
 
@@ -178,6 +186,22 @@ async def send_photo(message, filename, caption, reply_markup):
     if isinstance(caption, (tuple, list)):
         caption = "".join(caption)
     path = BASE_DIR / "webapp" / filename
+    existing_photo = getattr(message, "photo", None)
+    if isinstance(existing_photo, (list, tuple)) and existing_photo:
+        try:
+            await message.edit_media(
+                media=InputMediaPhoto(media=FSInputFile(path), caption=caption, parse_mode="HTML"),
+                reply_markup=reply_markup,
+            )
+            return
+        except Exception as error:
+            log.debug("edit_media failed, sending a new photo: %s", error)
+    elif not existing_photo:
+        try:
+            await message.edit_text(caption, parse_mode="HTML", reply_markup=reply_markup)
+            return
+        except Exception as error:
+            log.debug("edit_text failed, sending a new message: %s", error)
     if path.is_file():
         await message.answer_photo(FSInputFile(path), caption=caption, parse_mode="HTML", reply_markup=reply_markup)
     else:
@@ -532,8 +556,8 @@ async def menu_callback(callback: CallbackQuery):
     elif action == "shop":
         url = webapp_url()
         if url:
-            await message.answer(
-                "Мини-лавка открывается кнопкой «Лавка Странника» в меню.", parse_mode="HTML",
+            await replace_message(message,
+                "Мини-лавка открывается кнопкой «Лавка Странника» в меню.",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [blue_button("🏪 Лавка Странника", web_app=WebAppInfo(url=url))],
                     [blue_button("В меню", callback_data="menu:home")],
@@ -545,7 +569,7 @@ async def menu_callback(callback: CallbackQuery):
         await store.profile(user.model_dump(), user.id in ADMIN_IDS)
         await send_photo(message, "shop.jpg", SHOP_CAPTION, categories_keyboard())
     elif action == "more":
-        await message.answer("<b>Прочее</b>", parse_mode="HTML", reply_markup=more_keyboard())
+        await replace_message(message, "<b>Прочее</b>", more_keyboard())
     elif action == "profile":
         profile = await store.profile(user.model_dump(), user.id in ADMIN_IDS)
         caption = (
@@ -562,11 +586,11 @@ async def menu_callback(callback: CallbackQuery):
         profile = await store.profile(user.model_dump(), user.id in ADMIN_IDS)
         await replace_message(message, f"<b>Кошелёк странника</b>\n\nБаланс: <b>{profile['balance']:,} ₽</b>\n\nВыбери сумму пополнения:", wallet_keyboard())
     elif action == "support":
-        await message.answer(
+        await replace_message(message,
             "<b>Хранитель лавки на связи</b>\n\n"
             "Нужна помощь с выбором нейросети, оплатой или покупкой? "
-            "Напиши нам — поможем найти верный путь.", parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            "Напиши нам — поможем найти верный путь.",
+            InlineKeyboardMarkup(inline_keyboard=[
                 [blue_button("🛟 Написать в поддержку", url=f"https://t.me/{SUPPORT_USERNAME}")],
                 [blue_button("В меню", callback_data="menu:home")],
             ]),
@@ -688,9 +712,10 @@ async def buy_callback(callback: CallbackQuery):
         except ApiError as error:
             await callback.answer(error.message, show_alert=True)
             return
-        await callback.message.answer(
+        await replace_message(
+            callback.message,
             issued_message(result["issued"][0], f"🧪 Тестовая покупка — заказ № {result['order_id']}"),
-            parse_mode="HTML",
+            back_keyboard(),
         )
         await callback.answer("Тестовая покупка выполнена.")
         return

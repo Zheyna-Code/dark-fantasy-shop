@@ -357,7 +357,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <p class="eyebrow">Кошель странника</p><h1 id="wallet-title" tabindex="-1">Кошелёк</h1>
       <p>Баланс</p><p class="wallet-balance" id="wallet-balance">—</p>
       <p id="wallet-login">Баланс доступен после входа через Telegram.</p>
-      <p id="payment-note">Выбери сумму, затем способ оплаты: СБП или крипта.</p>
+      <p id="payment-note">Пополнение баланса согласуй с поддержкой. Заказы оплачиваются с баланса.</p>
       <div class="form-actions" id="topup-actions">
         <button class="action" type="button" data-topup="100">100 ₽</button><button class="action" type="button" data-topup="250">250 ₽</button><button class="action" type="button" data-topup="500">500 ₽</button><button class="action" type="button" data-topup="1000">1000 ₽</button><button class="action" type="button" data-topup="1500">1500 ₽</button>
       </div>
@@ -405,10 +405,6 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
         </fieldset>
         <p class="feedback" id="product-feedback" role="status" aria-live="polite"></p>
       </form>
-      <h2>Заказы</h2>
-      <p>«Оплачен» — только после проверки реальной оплаты. Доступные переходы зависят от текущего статуса.</p>
-      <p class="feedback" id="orders-feedback" role="status" aria-live="polite"></p>
-      <div id="admin-orders"></div>
     </section>
     <noscript><p class="notice">Для загрузки товаров и работы с Telegram включи JavaScript.</p></noscript>
   </div>
@@ -416,10 +412,10 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
 <dialog id="order-dialog" aria-labelledby="order-title" aria-describedby="order-summary order-explanation">
   <h2 id="order-title">Подтверждение заказа</h2>
   <p id="order-summary"></p>
-  <p id="order-explanation">Деньги сейчас не списываются. Оплата и выдача — вручную через поддержку. Подтверди отправку заявки.</p>
-  <div class="form-actions" id="payment-methods" hidden><button class="action primary" type="button" data-payment="balance">Баланс</button><button class="action" type="button" data-payment="crypto">Крипта (скоро)</button><button class="action" type="button" data-payment="sbp">СБП (скоро)</button></div>
+  <p id="order-explanation">После подтверждения сумма будет списана с твоего баланса.</p>
+  <div class="form-actions" id="payment-methods" hidden><button class="action primary" type="button" data-payment="balance">Оплатить с баланса</button></div>
   <p id="order-feedback" class="feedback" role="status" aria-live="polite"></p>
-  <div class="form-actions"><button class="action primary" id="confirm-order" type="button">Подтвердить заявку</button><button class="action" id="cancel-order" type="button">Отмена</button></div>
+  <div class="form-actions"><button class="action primary" id="confirm-order" type="button">Оплатить заказ</button><button class="action" id="cancel-order" type="button">Отмена</button></div>
   <a class="action support-link" id="order-support" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer" hidden>@DitzzmBack</a>
 </dialog>
 <script>
@@ -531,8 +527,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
         config = data;
         $("config-notice").hidden = true;
         $("payment-note").textContent = data.payment_enabled
-          ? "Онлайн-оплата в этой лавке не используется. Оплату и выдачу согласуй вручную с поддержкой."
-          : "Платёжный сервис не подключён. Пополнение и онлайн-оплата недоступны. Оформление и исполнение заказов — вручную через поддержку.";
+          ? "Оплата товаров списывается с баланса Telegram-кошелька."
+          : "Оплата временно недоступна. Обратись в поддержку.";
         const username = typeof data.support_username === "string" && /^[A-Za-z0-9_]{5,32}$/.test(data.support_username) ? data.support_username : "DitzzmBack";
         document.querySelectorAll(".support-link").forEach(link => { link.href = "https://t.me/" + username; link.textContent = "@" + username; });
         setArt("hero-image", data.images?.menu, "/static/bg.jpg", "hero-fallback");
@@ -735,7 +731,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     $("session-notice").hidden = authenticated || !initData();
     $("session-notice").replaceChildren();
     if (!authenticated) {
-      $("session-notice").append(node("p", "", initData() ? sessionError || "Проверяем вход через Telegram…" : "Ты вне Telegram: доступен только просмотр. Для профиля, кошелька и заказов открой лавку в Telegram."));
+      $("session-notice").append(node("p", "", initData() ? sessionError || "Проверяем вход через Telegram…" : "Ты вне Telegram: доступен только просмотр. Для профиля и кошелька открой лавку в Telegram."));
       if (initData() && sessionError) $("session-notice").append(button("Повторить вход", loadMe));
     }
     $("admin-entry").hidden = !isAdmin();
@@ -755,7 +751,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     if (!isAdmin()) {
       adminReady = false;
       adminCategories = []; adminProducts = [];
-      $("admin-categories").replaceChildren(); $("admin-products").replaceChildren(); $("admin-orders").replaceChildren();
+      $("admin-categories").replaceChildren(); $("admin-products").replaceChildren();
       if (currentView === "admin") setView("catalog", false);
     }
     syncAdminControls();
@@ -786,8 +782,15 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   async function topup(amount) {
     if (!me || !initData()) return;
     document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = true; });
-    feedback("wallet-feedback", `Пополнение ${money(amount)}: СБП и крипта пока недоступны. Ожидайте, скоро будет доступно.`, true);
-    document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = false; });
+    try {
+      await api("/api/wallet/topup", { method: "POST", auth: true, body: { amount } });
+      await loadMe();
+      feedback("wallet-feedback", `Баланс пополнен на ${money(amount)}.`);
+    } catch (error) {
+      feedback("wallet-feedback", message(error), true);
+    } finally {
+      document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = false; });
+    }
   }
   function setView(view, focus = true) {
     if (!["catalog", "profile", "wallet", "support", "admin"].includes(view) || (view === "admin" && !isAdmin())) return;
@@ -826,12 +829,12 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "test" ? "\nТестовый режим: оплата не требуется." : ""}`;
       $("order-explanation").textContent = kind === "test"
         ? "Тестовая покупка без оплаты: после подтверждения бот автоматически отправит товар в чат. Так тестеры проверяют автовыдачу."
-        : "Выбери способ оплаты: баланс доступен сейчас, крипта и СБП появятся позже.";
+        : "После подтверждения сумма будет списана с твоего баланса.";
       $("payment-methods").hidden = kind !== "order";
       document.querySelectorAll("[data-payment]").forEach(button => button.classList.toggle("primary", button.dataset.payment === selectedPayment));
-      feedback("order-feedback", orderIntent.attempted ? "Предыдущая отправка не подтверждена. Повтор использует тот же ключ заявки, чтобы не создать дубликат." : "");
+      feedback("order-feedback", orderIntent.attempted ? "Предыдущая попытка не подтверждена. Повтор использует тот же ключ, чтобы не создать дубликат." : "");
       $("confirm-order").hidden = false; $("confirm-order").disabled = false;
-      $("confirm-order").textContent = orderIntent.attempted ? "Повторить ту же заявку" : "Подтвердить заявку";
+      $("confirm-order").textContent = orderIntent.attempted ? "Повторить оплату" : "Оплатить заказ";
       $("cancel-order").textContent = "Отмена"; $("cancel-order").disabled = false;
       $("order-support").hidden = true;
       dialog.showModal();
@@ -856,7 +859,6 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     feedback("order-feedback", "Проводим оплату…");
     intent.attempted = true;
     try {
-      if (intent.kind === "order" && selectedPayment !== "balance") throw new Error("Этот способ оплаты скоро будет доступен.");
       const result = await api("/api/order", { method: "POST", auth: true, body: { cart: [{ id: intent.product.id, qty: 1 }], kind: intent.kind, payment: selectedPayment, comment: "", idempotency_key: intent.key } });
       intent.done = true;
       orderKeys.delete(intent.signature);
@@ -870,7 +872,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       loadCatalog(); loadMe();
     } catch (error) {
       feedback("order-feedback", message(error) + " Повтори попытку после обновления баланса или каталога.", true);
-      $("confirm-order").textContent = "Повторить ту же заявку";
+      $("confirm-order").textContent = "Повторить оплату";
       $("order-support").hidden = true;
       loadCatalog();
     } finally {
@@ -886,7 +888,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     $("category-fields").disabled = locked;
     $("product-fields").disabled = locked;
     $("refresh-admin").disabled = adminBusy || Boolean(adminRequest) || !isAdmin();
-    document.querySelectorAll("#admin-categories button, #admin-products button, #admin-orders button").forEach(control => { control.disabled = locked; });
+    document.querySelectorAll("#admin-categories button, #admin-products button").forEach(control => { control.disabled = locked; });
     categoryForm.elements.namedItem("slug").readOnly = editingCategory !== null;
     categoryForm.elements.namedItem("active").disabled = editingCategory === null;
     productForm.elements.namedItem("active").disabled = editingProduct === null;
@@ -950,39 +952,12 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       $("admin-products").append(row);
     });
   }
-  const statusNames = new Map([["new", "Новый"], ["preorder", "Предзаказ"], ["paid", "Оплачен"], ["done", "Выдан"], ["cancelled", "Отменён"]]);
-  const transitions = new Map([["new", ["paid", "cancelled"]], ["paid", ["done"]], ["preorder", ["paid", "cancelled"]]]);
-  function renderOrders(orders) {
-    $("admin-orders").replaceChildren();
-    if (!orders.length) $("admin-orders").append(node("p", "", "Заказов пока нет."));
-    orders.forEach(order => {
-      const row = node("article", "order-row");
-      row.append(node("h3", "", `Заказ № ${order.id} · ${statusNames.get(order.status) || order.status}`));
-      const date = new Date(order.created_at);
-      const created = Number.isNaN(date.getTime()) ? String(order.created_at ?? "—") : date.toLocaleString("ru-RU");
-      row.append(node("p", "", `Покупатель: ${order.user_id} · ${integer(order.total) ? money(order.total) : "Сумма не указана"}\n${created}`));
-      let items = order.items;
-      if (typeof items === "string") { try { items = JSON.parse(items); } catch { /* Preserve readable server text below. */ } }
-      if (Array.isArray(items)) {
-        const list = node("ul");
-        items.forEach(item => list.append(node("li", "", typeof item === "object" && item ? `${item.name ?? item.product_name ?? item.product?.name ?? "Товар " + (item.id ?? item.product_id ?? "")} × ${item.qty ?? item.quantity ?? 1}` : String(item))));
-        row.append(list);
-      } else row.append(node("p", "", typeof items === "string" ? items : "Состав заказа не указан"));
-      const controls = node("div", "form-actions");
-      (transitions.get(order.status) || []).forEach(status => {
-        controls.append(button(status === "paid" ? "Отметить оплату" : status === "done" ? "Отметить выдачу" : "Отменить заказ", () => changeOrderStatus(order, status)));
-      });
-      row.append(controls); $("admin-orders").append(row);
-    });
-  }
   function loadAdmin() {
     if (!isAdmin()) return Promise.resolve();
     if (adminRequest) return adminRequest;
     if (adminBusy) return Promise.resolve();
     feedback("admin-feedback", "Загружаем каталог управления…");
-    feedback("orders-feedback", "Загружаем заказы…");
-    adminRequest = Promise.all([
-      (async () => {
+    adminRequest = (async () => {
         try {
           const data = await api("/api/admin/catalog", { auth: true });
           if (!Array.isArray(data.categories) || !Array.isArray(data.products)) throw new Error("Неверный формат каталога управления.");
@@ -993,16 +968,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
           adminReady = false;
           feedback("admin-feedback", message(error) + " Нажми «Обновить данные».", true);
         }
-      })(),
-      (async () => {
-        try {
-          const data = await api("/api/admin/orders", { auth: true });
-          if (!Array.isArray(data.orders)) throw new Error("Неверный формат списка заказов.");
-          if (!isAdmin()) return;
-          renderOrders(data.orders); feedback("orders-feedback");
-        } catch (error) { $("admin-orders").replaceChildren(); feedback("orders-feedback", message(error) + " Нажми «Обновить данные».", true); }
-      })()
-    ]).finally(() => { adminRequest = null; syncAdminControls(); });
+      })().finally(() => { adminRequest = null; syncAdminControls(); });
     syncAdminControls();
     return adminRequest;
   }
@@ -1021,14 +987,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       // Wait out any older public request before fetching the committed values.
       if (catalogRequest) await catalogRequest;
       await Promise.all([loadCatalog(), adminRefresh]);
-      if (feedbackId === "orders-feedback" && isAdmin() && !$(feedbackId).classList.contains("error")) feedback(feedbackId, "Статус заказа сохранён.");
     }
-  }
-  async function changeOrderStatus(order, status) {
-    if (!isAdmin() || adminBusy || adminRequest || !(transitions.get(order.status) || []).includes(status)) return;
-    const question = status === "paid" ? `Оплата заказа № ${order.id} действительно получена?` : status === "done" ? `Товар по заказу № ${order.id} действительно выдан?` : `Отменить заказ № ${order.id}?`;
-    if (!window.confirm(question)) return;
-    await saveAdmin(`/api/admin/orders/${encodeURIComponent(order.id)}`, "PATCH", { status }, "orders-feedback");
   }
 
   categoryForm.addEventListener("submit", async event => {
@@ -1060,8 +1019,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   $("refresh-profile").addEventListener("click", loadMe);
   $("confirm-order").addEventListener("click", submitOrder);
   document.querySelectorAll("[data-payment]").forEach(button => button.addEventListener("click", () => {
-    if (button.dataset.payment !== "balance") { feedback("order-feedback", "Этот способ оплаты скоро будет доступен.", true); return; }
-    selectedPayment = "balance"; document.querySelectorAll("[data-payment]").forEach(item => item.classList.toggle("primary", item === button));
+    selectedPayment = "balance";
+    document.querySelectorAll("[data-payment]").forEach(item => item.classList.toggle("primary", item === button));
   }));
   document.querySelectorAll("[data-topup]").forEach(button => button.addEventListener("click", () => topup(Number(button.dataset.topup))));
   $("cancel-order").addEventListener("click", () => { if (!orderBusy) dialog.close(); });
