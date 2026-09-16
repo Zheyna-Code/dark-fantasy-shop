@@ -25,6 +25,8 @@ DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "shop.db"))
 SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "DitzzmBack").lstrip("@")
 if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
     raise ValueError("SUPPORT_USERNAME must be a Telegram username without a URL")
+PRIVACY_POLICY_URL = "https://teletype.in/@aishopditzzm/6rLg2BNAz8-"
+USER_AGREEMENT_URL = "https://teletype.in/@aishopditzzm/OniyCUsM8gt"
 
 
 def parse_admin_ids(value):
@@ -49,8 +51,8 @@ MENU_CAPTION = (
     "<b>Добро пожаловать в Лавку Странника!</b>\n\n"
     "Спасибо, что пользуешься нашей лавкой, путник. "
     "Отдохни у старого дуба: здесь начинается твой путь в мир нейросетей.\n\n"
-    "Выбирай, куда отправиться: к товарам, в мини-лавку, в свой профиль, "
-    "к кошельку или за помощью к хранителю лавки."
+    "Выбирай, куда отправиться: к товарам, в мини-лавку, к кошельку "
+    "или в раздел «Прочее»."
 )
 SHOP_CAPTION = (
     "<b>Ты попал в Лавку Странника</b>\n\n"
@@ -112,9 +114,18 @@ def menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button("🛒 Товары", callback_data="menu:products")],
         [blue_button("🏪 Лавка Странника", **shop_action)],
-        [blue_button("👤 Профиль", callback_data="menu:profile")],
         [blue_button("💰 Кошелёк", callback_data="menu:wallet")],
+        [blue_button("Прочее", callback_data="menu:more")],
+    ])
+
+
+def more_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button("👤 Профиль", callback_data="menu:profile")],
         [blue_button("🛟 Техподдержка", callback_data="menu:support")],
+        [blue_button("Политика конфиденциальности", url=PRIVACY_POLICY_URL)],
+        [blue_button("Пользовательское соглашение", url=USER_AGREEMENT_URL)],
+        [blue_button("В меню", callback_data="menu:home")],
     ])
 
 
@@ -490,7 +501,7 @@ async def menu_callback(callback: CallbackQuery):
     await callback.answer()
     message, user = callback.message, callback.from_user
     action = callback.data.split(":", 1)[1]
-    if action in ("home", "products", "shop"):
+    if action in ("home", "products", "shop", "more"):
         add_state.pop(user.id, None)
         upload_state.pop(user.id, None)
     if action == "home":
@@ -510,6 +521,8 @@ async def menu_callback(callback: CallbackQuery):
     elif action == "products":
         await store.profile(user.model_dump(), user.id in ADMIN_IDS)
         await send_photo(message, "shop.jpg", SHOP_CAPTION, categories_keyboard())
+    elif action == "more":
+        await message.answer("<b>Прочее</b>", parse_mode="HTML", reply_markup=more_keyboard())
     elif action == "profile":
         profile = await store.profile(user.model_dump(), user.id in ADMIN_IDS)
         caption = (
@@ -559,14 +572,10 @@ async def category_callback(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "preorders")
 async def preorders_callback(callback: CallbackQuery):
-    """Отдельная полка: все товары, которые можно заказать с предоплатой 100%."""
+    """Личная полка пользователя с его активными предзаказами."""
     await callback.answer()
     add_state.pop(callback.from_user.id, None)
     upload_state.pop(callback.from_user.id, None)
-    catalog = await store.catalog()
-    items = [product for product in catalog["products"]
-             if not product.get("is_test") and type(product.get("price")) is int and product["price"] > 0
-             and (product["stock"] if type(product["stock"]) is int else 0) == 0]
     personal = await store.user_preorders(callback.from_user.id)
     lines = [
         "<b>⏳ Полка предзаказов</b>", "",
@@ -581,22 +590,16 @@ async def preorders_callback(callback: CallbackQuery):
             names = ", ".join(str(item.get("name", "Товар")) for item in order["items"]) or "Товар"
             lines.append(f"⏳ Заказ № {order['id']} · {escape(names)} — {status}")
     personal_items = []
-    personal_ids = set()
     for order in personal:
         for item in order["items"]:
             product_id = item.get("id")
-            if product_id not in personal_ids:
-                personal_ids.add(product_id)
+            if not any(existing["id"] == product_id for existing in personal_items):
                 personal_items.append({"id": product_id, "name": item.get("name", "Товар")})
-    available = [item for item in items if item["id"] not in personal_ids]
-    if available:
-        lines.extend(["<b>Можно оформить сейчас</b>", ""])
-    visible_items = personal_items + available
-    rows = [[styled_button(item["name"][:50], "danger", callback_data=f"product:{item['id']}")] for item in visible_items[:12]]
-    if not personal and not available:
-        lines.append("Сейчас нет активных предзаказов и товаров, доступных для предзаказа.")
-    if len(visible_items) > 12:
-        lines.append(f"… и ещё {len(visible_items) - 12}: смотри мини-лавку.")
+    rows = [[styled_button(item["name"][:50], "danger", callback_data=f"product:{item['id']}")] for item in personal_items[:12]]
+    if not personal:
+        lines.append("У тебя пока нет оформленных предзаказов.")
+    if len(personal_items) > 12:
+        lines.append(f"… и ещё {len(personal_items) - 12}: список обрезан.")
     rows.append([styled_button("Назад", "danger", callback_data="menu:products")])
     await send_photo(callback.message, "shop.jpg", "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows))
 

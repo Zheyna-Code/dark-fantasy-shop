@@ -387,11 +387,18 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_menu_keyboards_and_photo_files(self):
         menu = shop.menu_keyboard().model_dump(exclude_none=True)
-        self.assertEqual(len(menu["inline_keyboard"]), 5)
+        self.assertEqual(len(menu["inline_keyboard"]), 4)
         for row in menu["inline_keyboard"]:
             self.assertEqual(row[0]["style"], "primary")
         self.assertEqual(menu["inline_keyboard"][1][0]["text"], "🏪 Лавка Странника")
         self.assertIn("web_app", menu["inline_keyboard"][1][0])
+        more = next(row[0] for row in menu["inline_keyboard"] if row[0].get("callback_data") == "menu:more")
+        self.assertEqual(more["text"], "Прочее")
+        extra = shop.more_keyboard().inline_keyboard
+        self.assertEqual(extra[0][0].callback_data, "menu:profile")
+        self.assertEqual(extra[1][0].callback_data, "menu:support")
+        self.assertEqual(extra[2][0].url, shop.PRIVACY_POLICY_URL)
+        self.assertEqual(extra[3][0].url, shop.USER_AGREEMENT_URL)
         categories = shop.categories_keyboard().inline_keyboard[0]
         self.assertEqual([button.text for button in categories], ["ChatGPT", "CapCut", "Gemini"])
         self.assertEqual([button.callback_data for button in categories], ["category:chatgpt", "category:capcut", "category:gemini"])
@@ -502,8 +509,7 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Полка предзаказов", caption)
         self.assertIn("предоплате 100%", caption)
         rows = shelf.answer_photo.call_args.kwargs["reply_markup"].inline_keyboard
-        product_button = next(button for row in rows for button in row if button.callback_data == f"product:{plain_id}")
-        self.assertEqual(product_button.model_dump(exclude_none=True)["style"], "danger")
+        self.assertEqual(len(rows), 1)
         self.assertEqual(rows[-1][0].callback_data, "menu:products")
 
     async def test_admin_shelf_add_wizard_and_two_step_delete(self):
