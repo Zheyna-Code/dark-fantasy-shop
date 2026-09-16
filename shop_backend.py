@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import re
 import time
 from collections import Counter
@@ -12,9 +13,78 @@ from pathlib import Path
 from urllib.parse import parse_qsl
 
 import aiosqlite
+try:
+    import asyncpg
+except ModuleNotFoundError:  # Optional for local SQLite-only development.
+    asyncpg = None
 from aiohttp import web
 
 log = logging.getLogger("lavka.api")
+
+
+class _PgResult:
+    def __init__(self, rows=None, lastrowid=None):
+        self._rows = rows or []
+        self.lastrowid = lastrowid
+
+    async def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    async def fetchall(self):
+        return self._rows
+
+
+class _PgConnection:
+    """Small asyncpg adapter matching the aiosqlite calls used by Store."""
+    def __init__(self, conn):
+        self.conn = conn
+
+    @staticmethod
+    def _sql(sql, params):
+        sql = sql.replace("BEGIN IMMEDIATE", "BEGIN")
+        sql = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT INTO", sql, flags=re.I)
+        index = 0
+        def replace(_match):
+            nonlocal index
+            index += 1
+            return f"${index}"
+        return re.sub(r"\?", replace, sql)
+
+    async def execute(self, sql, params=()):
+        params = tuple(params or ())
+        ignore_conflicts = bool(re.match(r"\s*INSERT\s+OR\s+IGNORE\s+INTO", sql, re.I))
+        query = self._sql(sql, params)
+        if ignore_conflicts:
+            query += " ON CONFLICT DO NOTHING"
+        is_insert = query.lstrip().upper().startswith("INSERT")
+        if is_insert and "RETURNING" not in query.upper() and re.search(r"\bINTO\s+\w+", query, re.I):
+            query += " RETURNING id"
+        if query.lstrip().upper().startswith(("SELECT", "WITH")) or " RETURNING " in query.upper():
+            rows = await self.conn.fetch(query, *params)
+            return _PgResult(rows, rows[0]["id"] if rows and "id" in rows[0] else None)
+        await self.conn.execute(query, *params)
+        return _PgResult()
+
+    async def executemany(self, sql, seq):
+        values = [tuple(row) for row in seq]
+        if values:
+            await self.conn.executemany(self._sql(sql, values[0]), values)
+        return _PgResult()
+
+    async def executescript(self, script):
+        script = script.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+        for statement in (part.strip() for part in script.split(";")):
+            if statement:
+                await self.conn.execute(statement)
+
+    async def commit(self):
+        await self.conn.execute("COMMIT")
+
+    async def rollback(self):
+        await self.conn.execute("ROLLBACK")
+
+    async def close(self):
+        await self.conn.close()
 
 
 class ApiError(Exception):
@@ -69,12 +139,22 @@ def flag(value, name):
 class Store:
     def __init__(self, db_path):
         self.db_path = str(db_path)
+        self.database_url = os.environ.get("DATABASE_URL", "").strip()
         # Hosting providers commonly configure DB_PATH under a mounted
         # directory that is not present in a fresh container.
         Path(self.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
     @asynccontextmanager
     async def connection(self):
+        if self.database_url:
+            if asyncpg is None:
+                raise RuntimeError("DATABASE_URL is set, but asyncpg is not installed")
+            db = _PgConnection(await asyncpg.connect(self.database_url, ssl="require", statement_cache_size=0))
+            try:
+                yield db
+            finally:
+                await db.close()
+            return
         async with aiosqlite.connect(self.db_path, timeout=30) as db:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA foreign_keys=ON")
@@ -122,6 +202,8 @@ class Store:
                 "orders": {"kind": "TEXT NOT NULL DEFAULT 'order'", "idempotency_key": "TEXT", "request_hash": "TEXT"},
             }
             for table, fields in migrations.items():
+                if self.database_url:
+                    continue
                 columns = {row["name"] for row in await (await db.execute(f"PRAGMA table_info({table})")).fetchall()}
                 for name, definition in fields.items():
                     if name not in columns:
