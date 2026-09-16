@@ -8,6 +8,7 @@ import time
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import parse_qsl
 
 import aiosqlite
@@ -68,6 +69,9 @@ def flag(value, name):
 class Store:
     def __init__(self, db_path):
         self.db_path = str(db_path)
+        # Hosting providers commonly configure DB_PATH under a mounted
+        # directory that is not present in a fresh container.
+        Path(self.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
 
     @asynccontextmanager
     async def connection(self):

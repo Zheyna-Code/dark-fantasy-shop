@@ -137,6 +137,10 @@ def categories_keyboard():
 
 
 async def send_photo(message, filename, caption, reply_markup):
+    # Keep deployments with an older caption constant compatible: adjacent
+    # strings should be a single value, but a trailing comma makes a tuple.
+    if isinstance(caption, (tuple, list)):
+        caption = "".join(caption)
     path = BASE_DIR / "webapp" / filename
     if path.is_file():
         await message.answer_photo(FSInputFile(path), caption=caption, parse_mode="HTML", reply_markup=reply_markup)
