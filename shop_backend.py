@@ -305,6 +305,11 @@ class Store:
             products = await (await db.execute("SELECT COUNT(*) AS n FROM products WHERE active=1")).fetchone()
         return {"orders": row["orders"], "revenue": row["revenue"], "users": users["n"], "products": products["n"]}
 
+    async def user_ids(self):
+        async with self.connection() as db:
+            rows = await (await db.execute("SELECT user_id FROM users")).fetchall()
+        return [int(row["user_id"]) for row in rows]
+
     async def create_ticket(self, user_id, message):
         message = text(message, "Сообщение", 4000, True)
         async with self.connection() as db:
@@ -435,6 +440,9 @@ class Store:
                 elif product["stock"] < qty:
                     raise ApiError("Недостаточно товара. Обнови каталог.", 409)
                 else:
+                    ready = await (await db.execute("SELECT COUNT(*) AS n FROM deliveries WHERE product_id=? AND status='ready'", (product_id,))).fetchone()
+                    if not ready or ready["n"] < qty:
+                        raise ApiError("Товар ещё не готов к автоматической выдаче. Попробуй позже.", 409)
                     await db.execute("UPDATE products SET stock=stock-? WHERE id=?", (qty, product_id))
                 total += product["price"] * qty
                 items.append({"id": product_id, "name": product["name"], "price": product["price"], "qty": qty})

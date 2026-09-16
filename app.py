@@ -511,7 +511,7 @@ async def upload_wizard(message: Message):
     parts.append(f"🟢 Выставлено на полку: {result['stock_added']}")
     parts.append("Теперь кнопка покупки в карточке выдаёт эти строки автоматически.")
     await message.answer("\n".join(parts), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-        blue_button("Купить товар", callback_data=f"buy:{state['product_id']}")
+        blue_button("Открыть карточку товара", callback_data=f"product:{state['product_id']}")
     ]]))
     if state.get("message") is not None:
         slug = last_shelf.get(user.id)
