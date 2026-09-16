@@ -510,9 +510,20 @@ async def upload_wizard(message: Message):
         parts.append(f"📦 Автовыдача сразу отправила товар {result['delivered_to_preorders']} оплаченным предзаказам — покупатели получили его в чат.")
     parts.append(f"🟢 Выставлено на полку: {result['stock_added']}")
     parts.append("Теперь кнопка покупки в карточке выдаёт эти строки автоматически.")
-    await message.answer("\n".join(parts), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+    notice = "\n".join(parts)
+    markup = InlineKeyboardMarkup(inline_keyboard=[[
         blue_button("Открыть карточку товара", callback_data=f"product:{state['product_id']}")
-    ]]))
+    ]])
+    await message.answer(notice, parse_mode="HTML", reply_markup=markup)
+    bot = active_bot.get("bot")
+    if bot:
+        for recipient_id in await store.user_ids():
+            if recipient_id == user.id:
+                continue
+            try:
+                await bot.send_message(recipient_id, notice, parse_mode="HTML", reply_markup=markup)
+            except Exception as error:
+                log.info("Не удалось отправить уведомление о пополнении пользователю %s: %s", recipient_id, error)
     if state.get("message") is not None:
         slug = last_shelf.get(user.id)
         if slug in CATEGORY_PHOTOS:
