@@ -193,6 +193,16 @@ class Store:
                     traveler_no INTEGER PRIMARY KEY AUTOINCREMENT, user_id BIGINT NOT NULL UNIQUE,
                     first_name TEXT DEFAULT '', username TEXT DEFAULT '', created_at INTEGER NOT NULL,
                     balance INTEGER NOT NULL DEFAULT 0
+                    ,referred_by BIGINT, referral_rewarded INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS favorites (
+                    user_id BIGINT NOT NULL, product_id INTEGER NOT NULL,
+                    created_at INTEGER NOT NULL, PRIMARY KEY(user_id, product_id)
+                );
+                CREATE TABLE IF NOT EXISTS support_tickets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id BIGINT NOT NULL,
+                    text TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
+                    created_at INTEGER NOT NULL
                 );
             """)
             if self.database_url:
@@ -206,6 +216,7 @@ class Store:
                     "is_test": "INTEGER NOT NULL DEFAULT 0",
                 },
                 "orders": {"kind": "TEXT NOT NULL DEFAULT 'order'", "idempotency_key": "TEXT", "request_hash": "TEXT"},
+                "users": {"referred_by": "BIGINT", "referral_rewarded": "INTEGER NOT NULL DEFAULT 0"},
             }
             for table, fields in migrations.items():
                 if self.database_url:
@@ -263,9 +274,49 @@ class Store:
                         favorites[str(item.get("name", "Товар"))] += qty
             except (ValueError, TypeError, AttributeError):
                 continue
-        return {"traveler_no": row["traveler_no"], "purchases": purchases, "spent": spent,
+        return {"traveler_no": row["traveler_no"], "user_id": row["user_id"], "referral_link": f"https://t.me/{os.environ.get('BOT_USERNAME', 'lavka_bot')}?start=ref_{row['user_id']}", "purchases": purchases, "spent": spent,
                 "favorite_product": favorites.most_common(1)[0][0] if favorites else None,
                 "balance": row["balance"], "preorders": preorders, "is_admin": bool(is_admin)}
+
+    async def history(self, user_id):
+        async with self.connection() as db:
+            rows = await (await db.execute("SELECT id,items,total,status,created_at FROM orders WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,))).fetchall()
+        result = []
+        for row in rows:
+            result.append({"id": row["id"], "items": json.loads(row["items"]), "total": row["total"],
+                           "status": row["status"], "created_at": datetime.fromtimestamp(row["created_at"], timezone.utc).isoformat()})
+        return {"orders": result}
+
+    async def toggle_favorite(self, user_id, product_id):
+        async with self.connection() as db:
+            await db.execute("BEGIN IMMEDIATE")
+            row = await (await db.execute("SELECT 1 FROM favorites WHERE user_id=? AND product_id=?", (user_id, product_id))).fetchone()
+            if row:
+                await db.execute("DELETE FROM favorites WHERE user_id=? AND product_id=?", (user_id, product_id)); active = False
+            else:
+                await db.execute("INSERT INTO favorites(user_id,product_id,created_at) VALUES(?,?,?)", (user_id, product_id, int(time.time()))); active = True
+            await db.commit()
+        return {"ok": True, "favorite": active}
+
+    async def stats(self):
+        async with self.connection() as db:
+            row = await (await db.execute("SELECT COUNT(*) AS orders, COALESCE(SUM(total),0) AS revenue FROM orders WHERE status IN ('paid','done')")).fetchone()
+            users = await (await db.execute("SELECT COUNT(*) AS n FROM users")).fetchone()
+            products = await (await db.execute("SELECT COUNT(*) AS n FROM products WHERE active=1")).fetchone()
+        return {"orders": row["orders"], "revenue": row["revenue"], "users": users["n"], "products": products["n"]}
+
+    async def create_ticket(self, user_id, message):
+        message = text(message, "Сообщение", 4000, True)
+        async with self.connection() as db:
+            cursor = await db.execute("INSERT INTO support_tickets(user_id,text,created_at) VALUES(?,?,?)", (user_id, message, int(time.time())))
+            await db.commit()
+            if kind == "order" and payment == "balance" and total > 200:
+                async with self.connection() as reward_db:
+                    await reward_db.execute("BEGIN IMMEDIATE")
+                    await reward_db.execute("UPDATE users SET balance=balance+CAST(? * 0.03 AS INTEGER) WHERE user_id=(SELECT referred_by FROM users WHERE user_id=?) AND referral_rewarded=0", (total, user_id))
+                    await reward_db.execute("UPDATE users SET referral_rewarded=1 WHERE user_id=? AND referral_rewarded=0", (user_id,))
+                    await reward_db.commit()
+        return {"ok": True, "id": cursor.lastrowid}
 
     async def add_balance(self, user_id, amount):
         amount = integer(amount, "Сумма пополнения", 10**6, 1)
@@ -409,6 +460,12 @@ class Store:
                 result["issued"] = [{"user_id": user_id, "order_id": order_id, "kind": "test",
                                      "items": [{"name": names[product_id], "payloads": [row["payload"] for row in rows]} for product_id, qty, rows in allocation]}]
             return result
+
+    async def set_referrer(self, user_id, referrer_id):
+        if user_id == referrer_id: return
+        async with self.connection() as db:
+            await db.execute("UPDATE users SET referred_by=? WHERE user_id=? AND referred_by IS NULL", (referrer_id, user_id))
+            await db.commit()
 
     async def product(self, product_id):
         async with self.connection() as db:
@@ -695,6 +752,19 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         profile["is_tester"] = user["id"] in testers or user["id"] in admin_ids
         return web.json_response(profile)
 
+    async def history(request):
+        user = authenticate(request)
+        return web.json_response(await store.history(user["id"]))
+
+    async def favorite(request):
+        user = authenticate(request)
+        return web.json_response(await store.toggle_favorite(user["id"], item_id(request)))
+
+    async def ticket(request):
+        user = authenticate(request)
+        payload = await body(request)
+        return web.json_response(await store.create_ticket(user["id"], payload.get("text", "")))
+
     async def topup(request):
         user = authenticate(request)
         payload = await body(request)
@@ -707,6 +777,10 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
     async def admin_catalog(request):
         authenticate(request, True)
         return web.json_response(await store.catalog(admin=True))
+
+    async def stats(request):
+        authenticate(request, True)
+        return web.json_response(await store.stats())
 
     async def categories(request):
         authenticate(request, True)
@@ -746,7 +820,10 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
 
     app.add_routes([
         web.get("/api/catalog", catalog), web.get("/api/products", legacy_products),
-        web.get("/api/config", config), web.get("/api/me", me), web.post("/api/wallet/topup", topup), web.post("/api/order", order),
+        web.get("/api/config", config), web.get("/api/me", me), web.get("/api/history", history),
+        web.post("/api/favorites/{id}", favorite), web.post("/api/support/tickets", ticket),
+        web.post("/api/wallet/topup", topup), web.post("/api/order", order),
+        web.get("/api/admin/stats", stats),
         web.get("/api/admin/catalog", admin_catalog), web.get("/api/admin/orders", orders),
         web.post("/api/admin/categories", categories), web.patch("/api/admin/categories/{id}", categories),
         web.post("/api/admin/products", products), web.patch("/api/admin/products/{id}", products),

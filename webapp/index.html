@@ -351,6 +351,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <p class="art-fallback" id="profile-fallback" hidden>Летопись странника — твоя история в лавке.</p>
       <p id="profile-login">Открой лавку через Telegram, чтобы увидеть свой профиль. В браузере доступен только просмотр каталога.</p>
       <dl class="stats" id="profile-stats" hidden></dl>
+      <div class="form-actions"><button class="action" type="button" id="load-history">История покупок</button></div>
+      <div id="purchase-history"></div>
       <button class="action" type="button" id="refresh-profile" hidden>Обновить профиль</button>
     </section>
     <section class="page-panel" id="view-wallet" data-page="wallet" aria-labelledby="wallet-title" hidden>
@@ -368,6 +370,9 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <img class="page-art" id="support-image" src="/static/shop.jpg" alt="У прилавка Лавки Странника" width="1080" height="1080">
       <p class="art-fallback" id="support-fallback" hidden>Мы рядом, странник.</p>
       <p>Если сбился с пути или нужна помощь — обратись к нам.</p>
+      <textarea id="support-text" maxlength="4000" placeholder="Опиши вопрос"></textarea>
+      <button class="action primary" type="button" id="send-support">Отправить обращение</button>
+      <p class="feedback" id="support-feedback" role="status"></p>
       <a class="action primary support-link" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer">@DitzzmBack</a>
     </section>
     <section class="page-panel" id="view-admin" data-page="admin" aria-labelledby="admin-title" hidden>
@@ -375,6 +380,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <p class="eyebrow">За прилавком</p><h1 id="admin-title" tabindex="-1">Управление лавкой</h1>
       <p>Настоящие товары и остатки. Сними отметку «Показывать», чтобы скрыть запись без удаления.</p>
       <button class="action" id="refresh-admin" type="button">Обновить данные</button>
+      <button class="action" id="load-stats" type="button">Статистика</button>
+      <p class="feedback" id="stats-feedback" role="status"></p>
       <p class="feedback" id="admin-feedback" role="status" aria-live="polite"></p>
       <h2>Категории</h2>
       <div id="admin-categories"></div>
@@ -659,6 +666,14 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       if (product.is_test) footer.append(node("span", "test-badge", "🧪 Тестовая выдача"));
       else if (product.stock === 0) footer.append(node("span", "", "Нет в наличии"));
       card.append(footer);
+      const favorite = button("☆ В избранное", async () => {
+        if (!me || !initData()) return;
+        try {
+          const result = await api(`/api/favorites/${encodeURIComponent(product.id)}`, { method: "POST", auth: true });
+          favorite.textContent = result.favorite ? "★ В избранном" : "☆ В избранное";
+        } catch (error) { feedback("global-message", message(error), true); }
+      });
+      card.append(favorite);
       const kind = orderKind(product);
       const label = product.price <= 0 ? "Цена не задана" : !kind ? (product.is_test ? "🧪 Тестовый товар" : "Нет в наличии") : !initData() ? "Войди через Telegram" : !me ? "Подтверди вход" : !catalogReady ? "Обнови каталог" : kind === "test" ? "🧪 Тест-покупка (без оплаты)" : "Оформить заказ";
       const control = button(label, () => { if (performance.now() >= suppressClickUntil) openOrder(product.id); });
@@ -791,6 +806,34 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     } finally {
       document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = false; });
     }
+  }
+  async function loadHistory() {
+    if (!me || !initData()) return;
+    const target = $("purchase-history");
+    target.textContent = "Загружаем историю…";
+    try {
+      const data = await api("/api/history", { auth: true });
+      target.replaceChildren();
+      (data.orders || []).forEach(order => {
+        const items = (order.items || []).map(item => `${item.name} × ${item.qty}`).join(", ");
+        target.append(node("p", "admin-row", `№${order.id} · ${items} · ${money(order.total)} · ${order.status}`));
+      });
+      if (!data.orders?.length) target.textContent = "Покупок пока нет.";
+    } catch (error) { target.textContent = message(error); }
+  }
+  async function loadStats() {
+    try {
+      const data = await api("/api/admin/stats", { auth: true });
+      feedback("stats-feedback", `Пользователи: ${data.users} · Товаров: ${data.products} · Заказов: ${data.orders} · Выручка: ${money(data.revenue)}`);
+    } catch (error) { feedback("stats-feedback", message(error), true); }
+  }
+  async function sendSupport() {
+    const value = $("support-text").value.trim();
+    if (!value || !me || !initData()) return;
+    try {
+      const result = await api("/api/support/tickets", { method: "POST", auth: true, body: { text: value } });
+      $("support-text").value = ""; feedback("support-feedback", `Обращение №${result.id || ""} отправлено.`);
+    } catch (error) { feedback("support-feedback", message(error), true); }
   }
   function setView(view, focus = true) {
     if (!["catalog", "profile", "wallet", "support", "admin"].includes(view) || (view === "admin" && !isAdmin())) return;
@@ -1072,6 +1115,9 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     if (!config) loadConfig();
     if (currentView === "admin") loadAdmin();
   });
+  $("load-history").addEventListener("click", loadHistory);
+  $("load-stats").addEventListener("click", loadStats);
+  $("send-support").addEventListener("click", sendSupport);
   document.addEventListener("DOMContentLoaded", () => {
     app = window.Telegram?.WebApp;
     try {

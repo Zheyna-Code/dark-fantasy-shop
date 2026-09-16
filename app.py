@@ -362,6 +362,11 @@ async def cmd_add(message: Message):
 @dp.message(CommandStart())
 @dp.message(Command("menu"))
 async def cmd_menu(message: Message):
+    if message.text and message.text.startswith("/start ref_"):
+        raw = message.text.split("ref_", 1)[1].split()[0]
+        if raw.isdecimal():
+            await store.profile(message.from_user.model_dump(), message.from_user.id in ADMIN_IDS)
+            await store.set_referrer(message.from_user.id, int(raw))
     await send_menu(message, message.from_user)
 
 
@@ -497,12 +502,17 @@ async def upload_wizard(message: Message):
         await message.answer(f"Не удалось загрузить автовыдачу: {error.message}")
         return
     upload_state.pop(user.id, None)
-    parts = [f"<b>✅ Загружено единиц товара: {result['added']}</b>"]
+    product = await store.product(state["product_id"])
+    product_name = escape(str(product.get("name", "Товар"))) if product else "Товар"
+    product_price = f"{product['price']:,} ₽" if product and isinstance(product.get("price"), int) else "Цена уточняется"
+    parts = [f"<b>✅ Товар пополнен</b>\n\n<b>{product_name}</b>\nЦена: {product_price}\nЗагружено единиц: {result['added']}"]
     if result["delivered_to_preorders"]:
         parts.append(f"📦 Автовыдача сразу отправила товар {result['delivered_to_preorders']} оплаченным предзаказам — покупатели получили его в чат.")
     parts.append(f"🟢 Выставлено на полку: {result['stock_added']}")
     parts.append("Теперь кнопка покупки в карточке выдаёт эти строки автоматически.")
-    await message.answer("\n".join(parts), parse_mode="HTML")
+    await message.answer("\n".join(parts), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+        blue_button("Сразу открыть карточку товара", callback_data=f"product:{state['product_id']}")
+    ]]))
     if state.get("message") is not None:
         slug = last_shelf.get(user.id)
         if slug in CATEGORY_PHOTOS:
