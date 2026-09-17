@@ -579,8 +579,9 @@ class ShopTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(row[0]["style"], "primary")
         self.assertIn("web_app", menu["inline_keyboard"][1][0])
         self.assertNotIn("web_app", menu["inline_keyboard"][3][0])
-        self.assertIn(shop.PRIVACY_POLICY_URL,
-                      [button.url for row in shop.support_keyboard().inline_keyboard for button in row])
+        urls = [button.url for row in shop.support_keyboard().inline_keyboard for button in row]
+        self.assertIn(shop.PRIVACY_POLICY_URL, urls)
+        self.assertIn(shop.USER_AGREEMENT_URL, urls)
         self.assertEqual(menu["inline_keyboard"][3][0]["callback_data"], "menu:profile")
         self.assertEqual(menu["inline_keyboard"][5][0]["callback_data"], "menu:support")
         categories = shop.categories_keyboard().inline_keyboard[0]

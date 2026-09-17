@@ -150,6 +150,7 @@ def support_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button("🛟 Написать в поддержку", url=f"https://t.me/{SUPPORT_USERNAME}")],
         [blue_button("🔒 Политика конфиденциальности", url=PRIVACY_POLICY_URL)],
+        [blue_button("📜 Пользовательское соглашение", url=USER_AGREEMENT_URL)],
         [blue_button("В меню", callback_data="menu:home")],
     ])
 
