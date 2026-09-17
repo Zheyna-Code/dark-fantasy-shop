@@ -22,7 +22,7 @@ from shop_backend import ApiError, Store, register_api
 BASE_DIR = Path(__file__).resolve().parent
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")
-SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "DitzzmBack").lstrip("@")
+SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "DitzmBack").lstrip("@")
 if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
     raise ValueError("SUPPORT_USERNAME must be a Telegram username without a URL")
 PRIVACY_POLICY_URL = "https://teletype.in/@aishopditzzm/6rLg2BNAz8-"
@@ -57,8 +57,8 @@ MENU_CAPTION = (
     "Выбирай, куда отправиться."
 )
 SHOP_CAPTION = (
-    "<b>Ты попал в Лавку Странника</b>\n\n"
-    "Выбери свою магию."
+    "<b>🏪 Ты попал в Лавку Странника</b>\n\n"
+    "Выбери товар или категорию ниже — всё оформим прямо в боте."
 )
 CATEGORY_PHOTOS = {"chatgpt": "chatgptshop.jpg", "capcut": "Capcutshop.jpg", "gemini": "geminishop.jpg"}
 CATEGORY_TITLES = {"chatgpt": "ChatGPT", "capcut": "CapCut", "gemini": "Gemini"}
@@ -92,6 +92,8 @@ add_state = {}
 edit_state = {}
 # Conversational auto-delivery upload: user_id -> {"product_id", "name", "message"}.
 upload_state = {}
+# Editing one ready auto-delivery line: user_id -> {product_id, delivery_id, message}.
+delivery_edit_state = {}
 # Waiting for an optional review comment: user_id -> {"order_id", "product_id"}.
 review_state = {}
 # Two-step delete confirmation: set of (user_id, product_id).
@@ -135,7 +137,7 @@ def menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button("🛒 Товары", callback_data="menu:products")],
         [blue_button("🏪 Лавка Странника", **shop_action)],
-        [blue_button(" Бонус", callback_data="menu:bonus")],
+        [blue_button("🎁 Бонус", callback_data="menu:bonus")],
         [blue_button("👤 Профиль", callback_data="menu:profile")],
         [blue_button("💰 Кошелёк", callback_data="menu:wallet")],
         [blue_button("🛟 Техподдержка", callback_data="menu:support")],
@@ -159,7 +161,7 @@ def profile_keyboard(has_preorders=False):
     label = f"⏳ Предзаказы · {has_preorders}" if has_preorders else "⏳ Предзаказы"
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button(label, callback_data="preorders")],
-        [blue_button(" Техподдержка", callback_data="menu:support")],
+        [blue_button("🛟 Техподдержка", callback_data="menu:support")],
         [blue_button("В меню", callback_data="menu:home")],
     ])
 
@@ -168,14 +170,14 @@ def bonus_keyboard(referral_link):
     """Copyable invite link plus the usual navigation."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button("📋 Скопировать ссылку", copy_text={"text": referral_link})],
-        [blue_button(" Товары", callback_data="menu:products")],
+        [blue_button("🛒 Товары", callback_data="menu:products")],
         [blue_button("В меню", callback_data="menu:home")],
     ])
 
 
 def wallet_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [blue_button("Пополнить 100 ", callback_data="wallet:100"), blue_button("Пополнить 250 ₽", callback_data="wallet:250")],
+        [blue_button("💳 Пополнить 100 ₽", callback_data="wallet:100"), blue_button("💳 Пополнить 250 ₽", callback_data="wallet:250")],
         [blue_button("Пополнить 500 ₽", callback_data="wallet:500"), blue_button("Пополнить 1000 ₽", callback_data="wallet:1000")],
         [blue_button("Пополнить 1500 ₽", callback_data="wallet:1500")],
         [blue_button("В меню", callback_data="menu:home")],
@@ -184,8 +186,8 @@ def wallet_keyboard():
 
 def wallet_methods_keyboard(amount):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [blue_button(f"СБП · {amount} ", callback_data=f"walletpay:{amount}:sbp"), blue_button(f"Крипта · {amount} ", callback_data=f"walletpay:{amount}:crypto")],
-        [blue_button("Назад к суммам", callback_data="menu:wallet")],
+        [blue_button(f"🧾 Оплата админу · {amount} ₽", callback_data=f"walletpay:{amount}:admin")],
+        [blue_button("⬅️ Назад к суммам", callback_data="menu:wallet")],
     ])
 
 
@@ -440,7 +442,8 @@ def admin_product_keyboard(item):
                      callback_data=f"admtoggle:{item['id']}:is_test"),
          blue_button(f" Показ: {'да' if item['active'] else 'нет'} {on if item['active'] else off}",
                      callback_data=f"admtoggle:{item['id']}:active")],
-        [styled_button("📤 Пополнить автовыдачей", "success", callback_data=f"upload:{item['id']}")],
+        [styled_button("📤 Добавить автовыдачу", "success", callback_data=f"upload:{item['id']}")],
+        [blue_button("🧰 Изменить строки автовыдачи", callback_data=f"deliv:list:{item['id']}")],
         [styled_button("🗑 Удалить товар", "danger", callback_data=f"admdel:{item['id']}")],
         [blue_button("⬅️ К списку товаров", callback_data="adm:edit")],
     ])
@@ -520,6 +523,7 @@ async def cmd_cancel(message: Message):
     state = add_state.pop(user_id, None)
     upload_state.pop(user_id, None)
     edit_state.pop(user_id, None)
+    delivery_edit_state.pop(user_id, None)
     review_state.pop(user_id, None)
     if not state:
         await message.answer("Активных действий нет. Продолжай путь, путник.")
@@ -666,6 +670,30 @@ async def review_comment(message: Message):
     await message.answer("🙏 Спасибо! Отзыв сохранён.", reply_markup=back_keyboard())
 
 
+@dp.message(F.text, ~F.text.startswith("/"), lambda message: message.from_user.id in delivery_edit_state)
+async def delivery_edit_wizard(message: Message):
+    user = message.from_user
+    state = delivery_edit_state.get(user.id)
+    if not state:
+        return
+    value = (message.text or "").strip()
+    if not value or len(value) > 2000:
+        await message.answer("Строка товара должна быть от 1 до 2000 символов.")
+        return
+    try:
+        await store.replace_delivery(state["product_id"], state["delivery_id"], value)
+    except ApiError as error:
+        await message.answer(f"Не удалось заменить строку: {error.message}")
+        return
+    delivery_edit_state.pop(user.id, None)
+    item = await store.product(state["product_id"])
+    await message.answer("<b>✅ Строка автовыдачи заменена</b>", parse_mode="HTML",
+                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                             [blue_button("🧰 Изменить ещё", callback_data=f"deliv:list:{state['product_id']}")],
+                             [blue_button("⬅️ К товару", callback_data=f"admprod:{state['product_id']}")],
+                         ]))
+
+
 @dp.message(F.text, ~F.text.startswith("/"), lambda message: message.from_user.id in upload_state)
 async def upload_wizard(message: Message):
     user = message.from_user
@@ -703,6 +731,69 @@ async def upload_wizard(message: Message):
         slug = last_shelf.get(user.id)
         if slug in CATEGORY_PHOTOS:
             await show_category(state["message"], user, slug)
+
+
+@dp.callback_query(F.data.startswith("deliv:list:"))
+async def delivery_list_callback(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Это раздел хранителя лавки.", show_alert=True)
+        return
+    raw_id = callback.data.split(":")[-1]
+    if not raw_id.isdecimal():
+        await callback.answer()
+        return
+    product_id = int(raw_id)
+    item = await store.product(product_id)
+    if not item:
+        await callback.answer("Товар не найден.", show_alert=True)
+        return
+    deliveries = await store.delivery_items(product_id, 25)
+    rows = []
+    for delivery in deliveries:
+        preview = str(delivery["payload"]).replace("\n", " ")[:32]
+        rows.append([blue_button(f"✏️ {preview}", callback_data=f"deliv:edit:{product_id}:{delivery['id']}"),
+                     styled_button("🗑", "danger", callback_data=f"deliv:delete:{product_id}:{delivery['id']}")])
+    rows.append([blue_button("📤 Добавить строки", callback_data=f"upload:{product_id}")])
+    rows.append([blue_button("⬅️ К товару", callback_data=f"admprod:{product_id}")])
+    await callback.answer()
+    text = f"<b>🧰 Автовыдача · {escape(str(item['name']))}</b>\n\nГотовых строк: {len(deliveries)}\nВыбери строку для замены или удаления."
+    await replace_message(callback.message, text, InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+@dp.callback_query(F.data.startswith("deliv:edit:"))
+async def delivery_edit_callback(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Это раздел хранителя лавки.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 4 or not parts[2].isdecimal() or not parts[3].isdecimal():
+        await callback.answer()
+        return
+    product_id, delivery_id = int(parts[2]), int(parts[3])
+    delivery_edit_state[callback.from_user.id] = {"product_id": product_id, "delivery_id": delivery_id}
+    await callback.answer()
+    await replace_message(callback.message, "<b>✏️ Замена строки автовыдачи</b>\n\nОтправь новую строку товара одним сообщением.\nОтмена — /cancel.",
+                          InlineKeyboardMarkup(inline_keyboard=[[blue_button("⬅️ Назад", callback_data=f"deliv:list:{product_id}")]]))
+
+
+@dp.callback_query(F.data.startswith("deliv:delete:"))
+async def delivery_delete_callback(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Это раздел хранителя лавки.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 4 or not parts[2].isdecimal() or not parts[3].isdecimal():
+        await callback.answer()
+        return
+    product_id, delivery_id = int(parts[2]), int(parts[3])
+    try:
+        await store.delete_delivery(product_id, delivery_id)
+    except ApiError as error:
+        await callback.answer(error.message, show_alert=True)
+        return
+    await callback.answer("Строка удалена")
+    callback.data = f"deliv:list:{product_id}"
+    await delivery_list_callback(callback)
 
 
 @dp.callback_query(F.data.startswith("upload:"))
@@ -823,7 +914,26 @@ async def wallet_topup_callback(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("walletpay:"))
 async def wallet_payment_callback(callback: CallbackQuery):
-    await callback.answer("Ожидайте, способ оплаты скоро будет доступен.", show_alert=True)
+    try:
+        _, raw_amount, method = callback.data.split(":", 2)
+        amount = int(raw_amount)
+    except (ValueError, TypeError):
+        await callback.answer()
+        return
+    if method != "admin":
+        await callback.answer("Выбери оплату через администратора.", show_alert=True)
+        return
+    await callback.answer()
+    await replace_message(
+        callback.message,
+        f"<b>🧾 Пополнение кошелька · {amount} ₽</b>\n\n"
+        f"Напиши администратору @{SUPPORT_USERNAME} и отправь сумму <b>{amount} ₽</b>.\n"
+        "После проверки платежа администратор зачислит деньги на твой баланс.",
+        InlineKeyboardMarkup(inline_keyboard=[
+            [blue_button(" Написать администратору", url=f"https://t.me/{SUPPORT_USERNAME}")],
+            [blue_button("⬅️ Назад к кошельку", callback_data="menu:wallet")],
+        ]),
+    )
 
 
 @dp.callback_query(F.data.startswith("category:"))
@@ -957,12 +1067,59 @@ async def buy_callback(callback: CallbackQuery):
     price = f"{item['price']:,} ₽"
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [blue_button(f"💰 Баланс · {price}", callback_data=f"pay:{item['id']}:balance")],
-        [blue_button("₿ Крипта (скоро)", callback_data=f"pay:{item['id']}:crypto"),
-         blue_button(" СБП (скоро)", callback_data=f"pay:{item['id']}:sbp")],
-        [styled_button("Назад", "danger", callback_data=f"product:{item['id']}")],
+        [blue_button("🧾 Оплата через администратора", url=f"https://t.me/{SUPPORT_USERNAME}")],
+        [styled_button("⬅️ Назад", "danger", callback_data=f"product:{item['id']}")],
     ])
     await callback.answer()
     await replace_message(callback.message, f"<b>Оплата заказа</b>\n\n{escape(str(item['name']))} · {price}\n\nВыбери способ оплаты:", markup)
+
+
+async def web_order_notice(user, result):
+    bot = active_bot.get("bot")
+    if not bot:
+        return
+    total = int(result.get("total") or 0)
+    order_id = int(result.get("order_id") or 0)
+    items = result.get("items") or []
+    names = ", ".join(str(item.get("name", "Товар")) for item in items) or "Товар"
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button(f"💰 Оплатить с баланса · {total:,} ₽", callback_data=f"orderpay:{order_id}:balance")],
+        [blue_button("🧾 Оплатить админу", url=f"https://t.me/{SUPPORT_USERNAME}")],
+        [blue_button("🏠 В меню", callback_data="menu:home")],
+    ])
+    await bot.send_message(
+        user["id"],
+        f"<b>🧾 Счёт № {order_id} создан</b>\n\n{escape(names)}\nСумма: <b>{total:,} ₽</b>\n\n"
+        "Выбери оплату ниже. После списания с баланса товар придёт сюда автоматически.",
+        parse_mode="HTML", reply_markup=markup,
+    )
+
+
+@dp.callback_query(F.data.startswith("orderpay:"))
+async def web_order_payment_callback(callback: CallbackQuery):
+    try:
+        _, raw_order_id, payment = callback.data.split(":", 2)
+        order_id = int(raw_order_id)
+    except (ValueError, TypeError):
+        await callback.answer()
+        return
+    if payment != "balance":
+        await callback.answer("Оплата админу доступна по кнопке выше.", show_alert=True)
+        return
+    try:
+        result = await store.pay_order_balance(callback.from_user.id, order_id)
+    except ApiError as error:
+        await callback.answer(error.message, show_alert=True)
+        return
+    await callback.answer("Оплата прошла")
+    if result.get("issued"):
+        event = result["issued"][0]
+        await replace_message(callback.message, issued_message(event, f"📦 Покупка № {order_id} оплачена и выдана"), back_keyboard())
+        bot = active_bot.get("bot")
+        if bot:
+            await ask_review(bot, callback.from_user.id, order_id, event.get("items", []))
+    else:
+        await replace_message(callback.message, f"<b>✅ Счёт № {order_id} оплачен</b>\n\nСписано: <b>{result['total']:,} ₽</b>. Товар будет выдан автоматически после пополнения.", back_keyboard())
 
 
 @dp.callback_query(F.data.startswith("pay:"))
@@ -1467,7 +1624,7 @@ async def _broadcast(bot, recipients, filename, product, markup):
 async def make_app():
     application = web.Application(client_max_size=64 * 1024)
     register_api(application, store, BOT_TOKEN, ADMIN_IDS, SUPPORT_USERNAME, testers=TESTER_IDS,
-                 notifier=notify_deliveries, panel_token=ADMIN_PANEL_TOKEN)
+                 notifier=notify_deliveries, order_notifier=web_order_notice, panel_token=ADMIN_PANEL_TOKEN)
 
     async def index(request):
         return web.FileResponse(BASE_DIR / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})

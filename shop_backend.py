@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
 CREATE TABLE IF NOT EXISTS orders (
     id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, items TEXT NOT NULL,
     total INTEGER NOT NULL, comment TEXT DEFAULT '', status TEXT DEFAULT 'new',
-    created_at BIGINT NOT NULL, kind TEXT NOT NULL DEFAULT 'order',
+    created_at BIGINT NOT NULL, kind TEXT NOT NULL DEFAULT 'order', payment TEXT NOT NULL DEFAULT 'manual',
     idempotency_key TEXT, request_hash TEXT, units INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS users (
@@ -174,6 +174,7 @@ MIGRATIONS = {
     },
     "orders": {
         "kind": "TEXT NOT NULL DEFAULT 'order'",
+        "payment": "TEXT NOT NULL DEFAULT 'manual'",
         "idempotency_key": "TEXT",
         "request_hash": "TEXT",
         "units": "INTEGER NOT NULL DEFAULT 0",
@@ -335,7 +336,7 @@ class Store:
             "traveler_no": row["traveler_no"], "user_id": row["user_id"], "purchases": int(stats["purchases"]),
             "spent": int(stats["spent"]), "favorite_product": (favorites[0]["name"] or "Товар") if favorites else None,
             "balance": row["balance"], "preorders": int(preorders or 0), "is_admin": bool(is_admin),
-            "referral_link": f"https://t.me/{os.environ.get('BOT_USERNAME', 'lavka_bot')}?start=ref_{row['user_id']}",
+            "referral_link": f"https://t.me/{os.environ.get('BOT_USERNAME', 'wanderersshop_bot').lstrip('@')}?start=ref_{row['user_id']}",
         }
 
     async def referral_stats(self, user_id):
@@ -525,8 +526,6 @@ class Store:
             raise ApiError("Неизвестный способ оплаты.")
         if kind not in ("order", "test", "preorder"):
             raise ApiError("Неизвестный тип заявки.")
-        if kind == "order" and payment != "balance":
-            raise ApiError("Этот способ оплаты скоро будет доступен.", 409)
         key = text(body.get("idempotency_key"), "Ключ заявки", 128, True)
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", key):
             raise ApiError("Неверный ключ заявки.")
@@ -549,7 +548,7 @@ class Store:
             if previous:
                 if previous["request_hash"] != digest:
                     raise ApiError("Этот ключ уже использован для другой заявки.", 409)
-                result = {"ok": True, "order_id": previous["id"], "total": previous["total"], "replayed": True}
+                result = {"ok": True, "order_id": previous["id"], "total": previous["total"], "items": json.loads(previous["items"]), "replayed": True}
                 if previous["kind"] == "test":
                     result["test"] = True
                     result["issued"] = await self._issued_event(db, previous)
@@ -599,9 +598,9 @@ class Store:
                 await db.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", total, user_id)
             status = "done" if kind == "test" else ("preorder" if kind == "preorder" else ("paid" if payment == "balance" else "new"))
             order_id = await db.fetchval(
-                "INSERT INTO orders(user_id,items,total,comment,status,created_at,kind,idempotency_key,request_hash,units) "
-                "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
-                user_id, json.dumps(items, ensure_ascii=False), total, comment, status, int(time.time()), kind, key,
+                "INSERT INTO orders(user_id,items,total,comment,status,created_at,kind,payment,idempotency_key,request_hash,units) "
+                "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id",
+                user_id, json.dumps(items, ensure_ascii=False), total, comment, status, int(time.time()), kind, payment, key,
                 digest, sum(item["qty"] for item in items),
             )
             if kind == "test":
@@ -616,7 +615,7 @@ class Store:
                 issued = await self._try_fulfill(db, await db.fetchrow("SELECT * FROM orders WHERE id=$1", order_id))
                 if issued:
                     await db.execute("UPDATE orders SET status='done' WHERE id=$1", order_id)
-            result = {"ok": True, "order_id": order_id, "total": total, "replayed": False}
+            result = {"ok": True, "order_id": order_id, "total": total, "items": items, "replayed": False}
             if issued:
                 result["issued"] = issued
             if kind == "test":
@@ -626,6 +625,26 @@ class Store:
                                      "items": [{"name": names[product_id], "payloads": [row["payload"] for row in rows]}
                                                for product_id, qty, rows in allocation]}]
             return result
+
+    async def pay_order_balance(self, user_id, order_id):
+        async with self.transaction() as db:
+            order = await db.fetchrow("SELECT * FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE", order_id, user_id)
+            if not order:
+                raise ApiError("Счёт не найден.", 404)
+            if order["status"] != "new":
+                raise ApiError("Этот счёт уже обработан.", 409)
+            balance = await db.fetchval("SELECT balance FROM users WHERE user_id=$1 FOR UPDATE", user_id)
+            if balance is None or balance < order["total"]:
+                raise ApiError("Недостаточно средств на балансе.", 409)
+            await db.execute("UPDATE users SET balance=balance-$1 WHERE user_id=$2", order["total"], user_id)
+            issued = await self._try_fulfill(db, order)
+            status = "done" if issued else "paid"
+            await db.execute("UPDATE orders SET status=$1,payment='balance' WHERE id=$2", status, order_id)
+        result = {"ok": True, "id": order_id, "order_id": order_id, "status": status, "total": order["total"],
+                  "items": json.loads(order["items"])}
+        if issued:
+            result["issued"] = issued
+        return result
 
     async def set_referrer(self, user_id, referrer_id):
         if user_id == referrer_id:
@@ -722,6 +741,34 @@ class Store:
             events, consumed = await self._fulfill_preorders(db, product_id)
         return {"ok": True, "id": product_id, "added": len(lines), "delivered_to_preorders": len(events),
                 "stock_added": len(lines) - consumed, "issued": events}
+
+    async def delivery_items(self, product_id, limit=25):
+        async with self.connection() as db:
+            rows = await db.fetch(
+                "SELECT id,payload,created_at FROM deliveries WHERE product_id=$1 AND status='ready' ORDER BY id LIMIT $2",
+                product_id, limit,
+            )
+        return [{"id": row["id"], "payload": row["payload"], "created_at": row["created_at"]} for row in rows]
+
+    async def delete_delivery(self, product_id, delivery_id):
+        async with self.transaction() as db:
+            if not await db.fetchval(
+                "SELECT id FROM deliveries WHERE id=$1 AND product_id=$2 AND status='ready'", delivery_id, product_id,
+            ):
+                raise ApiError("Строка автовыдачи не найдена или уже выдана.", 404)
+            await db.execute("DELETE FROM deliveries WHERE id=$1", delivery_id)
+            await db.execute("UPDATE products SET stock=GREATEST(stock-1,0) WHERE id=$1", product_id)
+        return {"ok": True, "id": delivery_id, "product_id": product_id}
+
+    async def replace_delivery(self, product_id, delivery_id, payload):
+        payload = text(payload, "Строка товара", 2000, True)
+        async with self.transaction() as db:
+            if not await db.fetchval(
+                "SELECT id FROM deliveries WHERE id=$1 AND product_id=$2 AND status='ready'", delivery_id, product_id,
+            ):
+                raise ApiError("Строка автовыдачи не найдена или уже выдана.", 404)
+            await db.execute("UPDATE deliveries SET payload=$1 WHERE id=$2", payload, delivery_id)
+        return {"ok": True, "id": delivery_id, "product_id": product_id}
 
     async def product_deliveries(self, product_id):
         async with self.connection() as db:
@@ -922,7 +969,7 @@ async def api_errors(request, handler):
 
 
 def register_api(app, store, bot_token, admin_ids, support_username, testers=(), notifier=None,
-                 panel_token=""):
+                 order_notifier=None, panel_token=""):
     testers = set(testers)
     app.middlewares.append(api_errors)
 
@@ -1014,7 +1061,12 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         if amount not in (100, 250, 500, 1000, 1500):
             raise ApiError("Выбери доступную сумму пополнения.")
         await store.profile(user, user["id"] in admin_ids)
-        raise ApiError("Пополнение через СБП и крипту скоро будет доступно.", 409)
+        return web.json_response({
+            "ok": True,
+            "amount": amount,
+            "support_username": support_username,
+            "message": f"Для пополнения на {amount} ₽ напиши администратору @{support_username}.",
+        })
 
     async def admin_catalog(request):
         authenticate(request, True)
@@ -1056,13 +1108,38 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         authenticate(request, True)
         return web.json_response(await store.product_deliveries(item_id(request)))
 
+    async def deliveries_ready(request):
+        authenticate(request, True)
+        return web.json_response({"items": await store.delivery_items(item_id(request))})
+
+    async def delivery_patch(request):
+        authenticate(request, True)
+        raw_delivery_id = request.match_info.get("delivery_id", "")
+        if not raw_delivery_id.isdecimal():
+            raise ApiError("Неверный номер строки.")
+        payload = await body(request)
+        return web.json_response(await store.replace_delivery(item_id(request), int(raw_delivery_id), payload.get("payload", "")))
+
+    async def delivery_delete(request):
+        authenticate(request, True)
+        raw_delivery_id = request.match_info.get("delivery_id", "")
+        if not raw_delivery_id.isdecimal():
+            raise ApiError("Неверный номер строки.")
+        return web.json_response(await store.delete_delivery(item_id(request), int(raw_delivery_id)))
+
     async def order(request):
         user = authenticate(request)
         payload = await body(request)
         if payload.get("kind") == "test" and user["id"] not in admin_ids and user["id"] not in testers:
             raise ApiError("Тестовые покупки доступны только тестерам лавки.", 403)
         await store.profile(user, user["id"] in admin_ids)
-        return web.json_response(await deliver(await store.create_order(user["id"], payload)))
+        result = await store.create_order(user["id"], payload)
+        if order_notifier and payload.get("payment", "manual") == "manual" and not result.get("replayed"):
+            try:
+                await order_notifier(user, result)
+            except Exception as error:
+                log.warning("Order notice failed: %s", error)
+        return web.json_response(await deliver(result))
 
     async def admin_users(request):
         authenticate(request, True)
@@ -1096,5 +1173,8 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         web.delete("/api/admin/products/{id}", delete_product),
         web.post("/api/admin/products/{id}/deliveries", deliveries),
         web.get("/api/admin/products/{id}/deliveries", deliveries_view),
+        web.get("/api/admin/products/{id}/deliveries/ready", deliveries_ready),
+        web.patch("/api/admin/products/{id}/deliveries/{delivery_id}", delivery_patch),
+        web.delete("/api/admin/products/{id}/deliveries/{delivery_id}", delivery_delete),
         web.patch("/api/admin/orders/{id}", change_order),
     ])

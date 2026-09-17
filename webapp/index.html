@@ -373,7 +373,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <textarea id="support-text" maxlength="4000" placeholder="Опиши вопрос"></textarea>
       <button class="action primary" type="button" id="send-support">Отправить обращение</button>
       <p class="feedback" id="support-feedback" role="status"></p>
-      <a class="action primary support-link" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer">@DitzzmBack</a>
+      <a class="action primary support-link" href="https://t.me/DitzmBack" target="_blank" rel="noopener noreferrer">@DitzmBack</a>
     </section>
     <section class="page-panel" id="view-admin" data-page="admin" aria-labelledby="admin-title" hidden>
       <button class="action" type="button" data-view="catalog">К каталогу</button>
@@ -423,7 +423,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   <div class="form-actions" id="payment-methods" hidden><button class="action primary" type="button" data-payment="balance">Оплатить с баланса</button></div>
   <p id="order-feedback" class="feedback" role="status" aria-live="polite"></p>
   <div class="form-actions"><button class="action primary" id="confirm-order" type="button">Оплатить заказ</button><button class="action" id="cancel-order" type="button">Отмена</button></div>
-  <a class="action support-link" id="order-support" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer" hidden>@DitzzmBack</a>
+  <a class="action support-link" id="order-support" href="https://t.me/DitzmBack" target="_blank" rel="noopener noreferrer" hidden>@DitzmBack</a>
 </dialog>
 <script>
 (() => {
@@ -536,7 +536,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
         $("payment-note").textContent = data.payment_enabled
           ? "Оплата товаров списывается с баланса Telegram-кошелька."
           : "Оплата временно недоступна. Обратись в поддержку.";
-        const username = typeof data.support_username === "string" && /^[A-Za-z0-9_]{5,32}$/.test(data.support_username) ? data.support_username : "DitzzmBack";
+        const username = typeof data.support_username === "string" && /^[A-Za-z0-9_]{5,32}$/.test(data.support_username) ? data.support_username : "DitzmBack";
         document.querySelectorAll(".support-link").forEach(link => { link.href = "https://t.me/" + username; link.textContent = "@" + username; });
         setArt("hero-image", data.images?.menu, "/static/bg.jpg", "hero-fallback");
         setArt("profile-image", data.images?.profile || "/static/2.jpg", "/static/bg.jpg", "profile-fallback");
@@ -796,16 +796,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   }
   async function topup(amount) {
     if (!me || !initData()) return;
-    document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = true; });
-    try {
-      await api("/api/wallet/topup", { method: "POST", auth: true, body: { amount } });
-      await loadMe();
-      feedback("wallet-feedback", `Баланс пополнен на ${money(amount)}.`);
-    } catch (error) {
-      feedback("wallet-feedback", message(error), true);
-    } finally {
-      document.querySelectorAll("[data-topup]").forEach(button => { button.disabled = false; });
-    }
+    const username = config?.support_username || "DitzmBack";
+    feedback("wallet-feedback", `Для пополнения на ${money(amount)} напиши администратору @${username}. Оплата и зачисление проходят в боте.`);
   }
   async function loadHistory() {
     if (!me || !initData()) return;
@@ -867,17 +859,17 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       orderIntent = orderKeys.get(signature);
       orderIntent.signature = signature;
       orderIntent.done = false;
-      selectedPayment = kind === "order" ? "balance" : "manual";
-      $("order-title").textContent = kind === "test" ? "Тестовая покупка" : "Оплата заказа";
+      selectedPayment = kind === "order" ? "manual" : "manual";
+      $("order-title").textContent = kind === "test" ? "Тестовая покупка" : "Счёт в боте";
       $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "test" ? "\nТестовый режим: оплата не требуется." : ""}`;
       $("order-explanation").textContent = kind === "test"
-        ? "Тестовая покупка без оплаты: после подтверждения бот автоматически отправит товар в чат. Так тестеры проверяют автовыдачу."
-        : "После подтверждения сумма будет списана с твоего баланса.";
-      $("payment-methods").hidden = kind !== "order";
+        ? "Тестовая покупка без оплаты: после подтверждения бот автоматически отправит товар в чат."
+        : "Нажми подтверждение — бот откроет счёт в чате. Оплата и выдача пройдут уже в боте.";
+      $("payment-methods").hidden = true;
       document.querySelectorAll("[data-payment]").forEach(button => button.classList.toggle("primary", button.dataset.payment === selectedPayment));
       feedback("order-feedback", orderIntent.attempted ? "Предыдущая попытка не подтверждена. Повтор использует тот же ключ, чтобы не создать дубликат." : "");
       $("confirm-order").hidden = false; $("confirm-order").disabled = false;
-      $("confirm-order").textContent = orderIntent.attempted ? "Повторить оплату" : "Оплатить заказ";
+      $("confirm-order").textContent = kind === "test" ? "Подтвердить тест" : (orderIntent.attempted ? "Повторить счёт" : "Открыть счёт в боте");
       $("cancel-order").textContent = "Отмена"; $("cancel-order").disabled = false;
       $("order-support").hidden = true;
       dialog.showModal();
@@ -902,20 +894,19 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     feedback("order-feedback", "Проводим оплату…");
     intent.attempted = true;
     try {
-      const result = await api("/api/order", { method: "POST", auth: true, body: { cart: [{ id: intent.product.id, qty: 1 }], kind: intent.kind, payment: selectedPayment, comment: "", idempotency_key: intent.key } });
+      const result = await api("/api/order", { method: "POST", auth: true, body: { cart: [{ id: intent.product.id, qty: 1 }], kind: intent.kind, payment: intent.kind === "test" ? "balance" : "manual", comment: "", idempotency_key: intent.key } });
       intent.done = true;
       orderKeys.delete(intent.signature);
       const id = result?.id ?? result?.order_id ?? result?.order?.id;
       feedback("order-feedback", intent.kind === "test"
         ? `Тестовая покупка${id != null ? " № " + String(id) : ""} выполнена. Бот отправил товар тебе в чат.`
-        : result.issued ? `Заказ${id != null ? " № " + String(id) : ""} оплачен и выдан. Проверь сообщение от бота.`
-        : `Заказ${id != null ? " № " + String(id) : ""} оплачен с баланса.`);
+        : `Счёт${id != null ? " № " + String(id) : ""} создан. Открой чат с ботом — там будут способы оплаты.`);
       $("confirm-order").hidden = true;
       $("cancel-order").textContent = "Закрыть";
       $("order-support").hidden = true;
       loadCatalog(); loadMe();
     } catch (error) {
-      feedback("order-feedback", message(error) + " Повтори попытку после обновления баланса или каталога.", true);
+      feedback("order-feedback", message(error) + " Повтори попытку после обновления каталога.", true);
       $("confirm-order").textContent = "Повторить оплату";
       $("order-support").hidden = true;
       loadCatalog();
