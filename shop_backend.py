@@ -499,6 +499,11 @@ class Store:
             raise ApiError("Товар не найден.", 404)
         body = {key: product[key] for key in
                 ("name", "description", "warranty", "price", "category", "stock", "active", "allow_preorder", "is_test")}
+        # PostgreSQL INTEGER flag columns come back as 0/1. save_product()
+        # deliberately accepts real booleans only, so normalize untouched flags
+        # before rebuilding the complete product payload.
+        for key in ("active", "allow_preorder", "is_test"):
+            body[key] = bool(body[key])
         for key, value in fields.items():
             if key in ("active", "allow_preorder", "is_test"):
                 body[key] = bool(value)
@@ -802,7 +807,8 @@ class Store:
                 items = json.loads(order["items"])
             except (ValueError, TypeError):
                 items = []
-            if not any(item.get("id") == product_id for item in items):
+            purchased = next((item for item in items if item.get("id") == product_id), None)
+            if not purchased:
                 raise ApiError("В этом заказе такого товара нет.", 409)
             await db.execute(
                 "INSERT INTO reviews(user_id,product_id,order_id,rating,rating_text,created_at) "
@@ -810,7 +816,14 @@ class Store:
                 "rating=EXCLUDED.rating, rating_text=EXCLUDED.rating_text, created_at=EXCLUDED.created_at",
                 user_id, product_id, order_id, rating, rating_text, int(time.time()),
             )
-        return {"ok": True, "order_id": order_id, "product_id": product_id, "rating": rating}
+        return {
+            "ok": True,
+            "order_id": order_id,
+            "product_id": product_id,
+            "rating": rating,
+            "product_name": purchased.get("name") or "Товар",
+            "quantity": int(purchased.get("qty") or 1),
+        }
 
     async def product_reviews(self, product_id, limit=10):
         async with self.connection() as db:
@@ -969,7 +982,7 @@ async def api_errors(request, handler):
 
 
 def register_api(app, store, bot_token, admin_ids, support_username, testers=(), notifier=None,
-                 order_notifier=None, panel_token=""):
+                 order_notifier=None, product_notifier=None, panel_token=""):
     testers = set(testers)
     app.middlewares.append(api_errors)
 
@@ -1086,7 +1099,13 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         # A card saved from the browser panel must not silently drop preorder/test flags.
         if request.method == "PATCH":
             return web.json_response(await store.patch_product(item_id(request), payload))
-        return web.json_response(await store.save_product(payload, item_id(request)))
+        result = await store.save_product(payload, item_id(request))
+        if product_notifier and item_id(request) is None:
+            try:
+                await product_notifier(await store.product(result["id"]))
+            except Exception as error:
+                log.warning("Product announcement failed: %s", error)
+        return web.json_response(result)
 
     async def orders(request):
         authenticate(request, True)

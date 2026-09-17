@@ -25,6 +25,11 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")
 SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "DitzmBack").lstrip("@")
 if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
     raise ValueError("SUPPORT_USERNAME must be a Telegram username without a URL")
+# Optional group/channel where completed reviews are announced. Telegram chat IDs
+# are usually negative (for example -1001234567890); a public @username also works.
+REVIEWS_GROUP_CHAT_ID = os.environ.get("REVIEWS_GROUP_CHAT_ID", "").strip()
+# Optional channel/group where newly created products are announced.
+PRODUCTS_CHANNEL_CHAT_ID = os.environ.get("PRODUCTS_CHANNEL_CHAT_ID", "").strip()
 PRIVACY_POLICY_URL = "https://teletype.in/@aishopditzzm/6rLg2BNAz8-"
 USER_AGREEMENT_URL = "https://teletype.in/@aishopditzzm/OniyCUsM8gt"
 BONUS_PERCENT = 3
@@ -613,6 +618,7 @@ async def add_wizard(message: Message):
                 [blue_button("📤 Загрузить автовыдачу", callback_data=f"upload:{saved['id']}")],
             ]),
         )
+        await notify_new_product(await store.product(saved["id"]))
         if state.get("message") is not None:
             await show_category(state["message"], user, state["slug"])
         return
@@ -1212,18 +1218,42 @@ async def review_callback(callback: CallbackQuery):
     if len(parts) == 2 and parts[1] == "later":
         await callback.answer("Хорошо, оценишь позже.")
         return
+    # This handler is registered before the exact `review:done` handler, so
+    # handle the "Готово" button here instead of rejecting it as invalid data.
+    if len(parts) == 2 and parts[1] == "done":
+        review_state.pop(callback.from_user.id, None)
+        await callback.answer("Отзыв сохранён.")
+        await replace_message(
+            callback.message,
+            "<b>🙏 Спасибо за отзыв!</b>\n\nОн уже виден в карточке товара.",
+            back_keyboard(),
+        )
+        return
     if len(parts) != 4 or not all(part.isdecimal() for part in parts[1:]):
         await callback.answer()
         return
     order_id, product_id, rating = (int(part) for part in parts[1:])
-    if await callback.data.startswith("review:done"):
-        return
     user = callback.from_user
     try:
-        await store.add_review(user.id, order_id, product_id, rating)
+        review = await store.add_review(user.id, order_id, product_id, rating)
     except ApiError as error:
         await callback.answer(error.message, show_alert=True)
         return
+    bot = active_bot.get("bot")
+    if bot and REVIEWS_GROUP_CHAT_ID:
+        try:
+            quantity = int(review.get("quantity") or 1)
+            product_name = escape(str(review.get("product_name") or "Товар"))
+            await bot.send_message(
+                REVIEWS_GROUP_CHAT_ID,
+                "⭐ <b>Новый отзыв</b>\n\n"
+                f"Купили: <b>{product_name}</b>\n"
+                f"Количество: <b>{quantity} шт.</b>\n"
+                f"Оценка: <b>{rating}/5</b>",
+                parse_mode="HTML",
+            )
+        except Exception as error:
+            log.warning("Review group notification failed: %s", error)
     review_state[user.id] = {"order_id": order_id, "product_id": product_id, "rating": rating}
     await callback.answer(f"Спасибо! Оценка ⭐ {rating} сохранена.")
     item = await store.product(product_id)
@@ -1586,6 +1616,30 @@ async def notify_restock(product, delivered=0):
     return len(recipients)
 
 
+async def notify_new_product(product):
+    """Announce a newly created visible product in the configured channel."""
+    bot = active_bot.get("bot")
+    if not bot or not product or not PRODUCTS_CHANNEL_CHAT_ID:
+        return False
+    if not product.get("active") or product.get("is_test"):
+        return False
+    try:
+        filename = CATEGORY_PHOTOS.get(product.get("category"), "shop.jpg")
+        raw_price = product.get("price")
+        price = f"{int(raw_price):,} ₽" if isinstance(raw_price, int) and raw_price > 0 else "Цена уточняется"
+        caption = (
+            "🆕 <b>Новый товар в лавке</b>\n\n"
+            f"<b>{escape(str(product.get('name') or 'Товар'))}</b>\n"
+            f"Цена: <b>{price}</b>\n"
+            f"В наличии: <b>{int(product.get('stock') or 0)} шт.</b>"
+        )
+        await bot.send_photo(PRODUCTS_CHANNEL_CHAT_ID, photo_ref(filename), caption=caption, parse_mode="HTML")
+        return True
+    except Exception as error:
+        log.warning("New product channel notification failed: %s", error)
+        return False
+
+
 async def _broadcast(bot, recipients, filename, product, markup):
     """Рассылка с ограничением параллельности: не блокирует polling и переживает 429."""
     caption = (
@@ -1624,7 +1678,8 @@ async def _broadcast(bot, recipients, filename, product, markup):
 async def make_app():
     application = web.Application(client_max_size=64 * 1024)
     register_api(application, store, BOT_TOKEN, ADMIN_IDS, SUPPORT_USERNAME, testers=TESTER_IDS,
-                 notifier=notify_deliveries, order_notifier=web_order_notice, panel_token=ADMIN_PANEL_TOKEN)
+                 notifier=notify_deliveries, order_notifier=web_order_notice,
+                 product_notifier=notify_new_product, panel_token=ADMIN_PANEL_TOKEN)
 
     async def index(request):
         return web.FileResponse(BASE_DIR / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})
