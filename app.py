@@ -145,6 +145,7 @@ def menu_keyboard():
         [blue_button("🎁 Бонус", callback_data="menu:bonus")],
         [blue_button("👤 Профиль", callback_data="menu:profile")],
         [blue_button("💰 Кошелёк", callback_data="menu:wallet")],
+        [blue_button("⭐ Отзывы", url="https://t.me/otzivditzzm")],
         [blue_button("🛟 Техподдержка", callback_data="menu:support")],
     ])
 
