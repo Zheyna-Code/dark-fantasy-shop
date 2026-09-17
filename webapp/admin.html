@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#16100d">
+<title>Панель хранителя — Лавка Странника</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #16100d;
+  --panel: #1f1813;
+  --panel-2: #271e18;
+  --line: #3a2d24;
+  --gold: #d6a76c;
+  --muted: #b8a38c;
+  --ink: #f2e5cc;
+  --green: #4f9d69;
+  --red: #b4544a;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  min-height: 100vh; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 Georgia, "Times New Roman", serif;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 24px 16px 64px; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
+h1 { font-size: 26px; }
+h2 { font-size: 18px; margin: 24px 0 10px; color: var(--gold); }
+.eyebrow { color: var(--muted); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 150px; flex: 1 1 150px; }
+.field label { font-size: 12px; color: var(--muted); }
+input, textarea, select {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 100%;
+}
+textarea { min-height: 90px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; }
+button.action {
+  background: var(--gold); color: #241a12; border: 0; border-radius: 8px; padding: 10px 16px; font-weight: 700;
+}
+button.ghost { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+button.danger { background: var(--red); color: #fff; border: 0; border-radius: 8px; padding: 8px 12px; }
+button.mini { padding: 6px 10px; font-size: 13px; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.stat b { display: block; font-size: 22px; color: var(--gold); }
+.stat span { color: var(--muted); font-size: 13px; }
+table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 14px; }
+th { color: var(--muted); font-weight: 400; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+tr:hover td { background: var(--panel-2); }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+.tabs button { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; }
+.tabs button[aria-current="true"] { background: var(--gold); color: #241a12; border-color: var(--gold); font-weight: 700; }
+.feedback { margin-top: 10px; min-height: 20px; font-size: 14px; }
+.feedback.error { color: #ef9a90; }
+.feedback.ok { color: #8fd6a4; }
+.gate { max-width: 420px; margin: 12vh auto; }
+.pill { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 12px; border: 1px solid var(--line); color: var(--muted); }
+.pill.on { color: #8fd6a4; border-color: var(--green); }
+.pill.off { color: var(--muted); }
+.muted { color: var(--muted); }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.prod { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel-2); margin-bottom: 10px; }
+.prod h3 { font-size: 16px; margin-bottom: 6px; }
+.prod .meta { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.prod .tools { display: flex; flex-wrap: wrap; gap: 6px; }
+img.thumb { width: 100%; max-width: 220px; border-radius: 10px; border: 1px solid var(--line); }
+.scroll { max-height: 480px; overflow: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <section class="gate card" id="gate">
+    <p class="eyebrow">Лавка Странника</p>
+    <h1>Панель хранителя</h1>
+    <p class="muted">Полноразмерная админка для браузера. Введи токен панели (переменная <code>ADMIN_PANEL_TOKEN</code> на хостинге).</p>
+    <div class="row" style="margin-top:14px">
+      <div class="field">
+        <label for="token">Токен панели</label>
+        <input id="token" type="password" autocomplete="current-password" placeholder="вставь токен">
+      </div>
+      <button class="action" id="enter" type="button">Войти</button>
+    </div>
+    <p class="feedback error" id="gate-feedback" role="status" aria-live="polite"></p>
+  </section>
+
+  <div id="panel" hidden>
+    <header>
+      <div>
+        <p class="eyebrow">Лавка Странника</p>
+        <h1>Управление лавкой</h1>
+      </div>
+      <div class="row">
+        <button class="ghost" id="refresh" type="button">Обновить</button>
+        <button class="ghost" id="logout" type="button">Выйти</button>
+      </div>
+    </header>
+
+    <div class="stats" id="stats"></div>
+    <p class="feedback" id="feedback" role="status" aria-live="polite"></p>
+
+    <nav class="tabs" id="tabs">
+      <button type="button" data-tab="products" aria-current="true">Товары</button>
+      <button type="button" data-tab="add">Добавить товар</button>
+      <button type="button" data-tab="orders">Заказы</button>
+      <button type="button" data-tab="users">Покупатели</button>
+      <button type="button" data-tab="reviews">Отзывы</button>
+    </nav>
+
+    <!-- ТОВАРЫ -->
+    <section id="tab-products">
+      <h2>Товары и автовыдача</h2>
+      <div class="scroll" id="products"></div>
+    </section>
+
+    <!-- ДОБАВИТЬ -->
+    <section id="tab-add" hidden>
+      <h2>Новый товар</h2>
+      <div class="card">
+        <div class="row">
+          <div class="field"><label for="new-name">Название</label><input id="new-name" maxlength="200" placeholder="ChatGPT Plus"></div>
+          <div class="field"><label for="new-category">Категория</label><select id="new-category"></select></div>
+          <div class="field"><label for="new-price">Цена, ₽</label><input id="new-price" inputmode="numeric" placeholder="790"></div>
+          <div class="field"><label for="new-stock">Остаток</label><input id="new-stock" inputmode="numeric" placeholder="5"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div class="field" style="flex:1 1 100%"><label for="new-description">Описание</label><textarea id="new-description" maxlength="4000"></textarea></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <label><input type="checkbox" id="new-preorder" checked style="width:auto"> Разрешить предзаказ при нулевом остатке</label>
+          <label><input type="checkbox" id="new-test" style="width:auto"> Тестовый товар (виден тестерам)</label>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="action" id="create" type="button">Создать товар</button>
+        </div>
+        <p class="feedback" id="add-feedback" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <!-- ЗАКАЗЫ -->
+    <section id="tab-orders" hidden>
+      <h2>Заказы</h2>
+      <p class="muted">«Оплата получена» зачисляет заказ и сразу выдаёт товар автоматически.</p>
+      <div class="scroll" id="orders"></div>
+    </section>
+
+    <!-- ПОКУПАТЕЛИ -->
+    <section id="tab-users" hidden>
+      <h2>Покупатели</h2>
+      <div class="row card">
+        <div class="field">
+          <label for="user-id">Telegram ID покупателя (можно получить в профиле бота)</label>
+          <input id="user-id" inputmode="numeric" placeholder="123456789">
+        </div>
+        <div class="field"><label for="user-amount">Пополнить, ₽</label><input id="user-amount" inputmode="numeric" placeholder="500"></div>
+        <button class="action" id="topup" type="button">Пополнить баланс</button>
+      </div>
+      <p class="feedback" id="users-feedback" role="status" aria-live="polite"></p>
+      <div class="scroll" id="users"></div>
+    </section>
+
+    <!-- ОТЗЫВЫ -->
+    <section id="tab-reviews" hidden>
+      <h2>Отзывы покупателей</h2>
+      <div class="scroll" id="reviews"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const TOKEN_KEY = "lavka-panel-token";
+const CATEGORY_PHOTOS = { chatgpt: "/static/chatgptshop.jpg", gemini: "/static/geminishop.jpg", capcut: "/static/Capcutshop.jpg" };
+let panelToken = "";
+let catalog = { categories: [], products: [] };
+
+function feedback(node, text, kind) {
+  const box = typeof node === "string" ? $(node) : node;
+  box.textContent = text || "";
+  box.className = "feedback" + (kind ? " " + kind : "");
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    method: options.method || "GET",
+    headers: Object.assign({ "X-Admin-Token": panelToken }, options.body ? { "Content-Type": "application/json" } : {}),
+    body: options.body ? JSON.stringify(options.body) : undefined,
+    cache: "no-store",
+  });
+  let data = null;
+  try { data = await response.json(); } catch { /* пустой ответ — не ошибка сама по себе */ }
+  if (!response.ok) throw new Error((data && data.error) || ("Ошибка " + response.status));
+  return data;
+}
+
+function number(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? "").trim(), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function money(value) { return (value || 0).toLocaleString("ru-RU") + " ₽"; }
+function text(value) { return (value || "").toString(); }
+
+/* ------------------------------------------------------------------ вход --- */
+async function enter() {
+  panelToken = $("token").value.trim();
+  if (!panelToken) { feedback("gate-feedback", "Введи токен панели.", "error"); return; }
+  try {
+    await loadAll();
+    try { localStorage.setItem(TOKEN_KEY, panelToken); } catch { /* приватный режим — просто не запоминаем */ }
+    $("gate").hidden = true;
+    $("panel").hidden = false;
+  } catch (error) {
+    feedback("gate-feedback", error.message, "error");
+  }
+}
+
+function restore() {
+  let saved = "";
+  try { saved = localStorage.getItem(TOKEN_KEY) || ""; } catch { saved = ""; }
+  if (saved) { $("token").value = saved; enter(); }
+}
+
+/* ------------------------------------------------------------------ данные --- */
+async function loadAll() {
+  const [stats, catalogData, orders, users, reviews] = await Promise.all([
+    api("/api/admin/stats"), api("/api/admin/catalog"), api("/api/admin/orders"),
+    api("/api/admin/users"), api("/api/admin/reviews"),
+  ]);
+  catalog = catalogData;
+  renderStats(stats);
+  renderCategorySelect();
+  renderProducts();
+  renderOrders(orders.orders || []);
+  renderUsers(users.users || []);
+  renderReviews(reviews.reviews || []);
+}
+
+function renderStats(stats) {
+  const cells = [
+    ["Выручка", money(stats.revenue)],
+    ["Оплаченных заказов", stats.orders],
+    ["Покупателей", stats.users],
+    ["Товаров на полке", stats.products],
+    ["Отзывов", stats.reviews],
+    ["Средняя оценка", stats.reviews ? "⭐ " + stats.rating : "—"],
+  ];
+  $("stats").replaceChildren(...cells.map(([label, value]) => {
+    const card = document.createElement("div");
+    card.className = "stat";
+    const big = document.createElement("b"); big.textContent = value;
+    const small = document.createElement("span"); small.textContent = label;
+    card.append(big, small);
+    return card;
+  }));
+}
+
+function renderCategorySelect() {
+  const select = $("new-category");
+  const previous = select.value;
+  select.replaceChildren(...catalog.categories.filter(item => item.active).map(category => {
+    const option = document.createElement("option");
+    option.value = category.slug;
+    option.textContent = category.name;
+    return option;
+  }));
+  if (previous) select.value = previous;
+}
+
+function renderProducts() {
+  const box = $("products");
+  if (!catalog.products.length) { box.replaceChildren(paragraph("Товаров пока нет. Добавь первый.", "muted")); return; }
+  box.replaceChildren(...catalog.products.map(product => productCard(product)));
+}
+
+function paragraph(value, className) {
+  const node = document.createElement("p");
+  node.textContent = value;
+  if (className) node.className = className;
+  return node;
+}
+
+function productCard(product) {
+  const card = document.createElement("div");
+  card.className = "prod";
+  const title = document.createElement("h3");
+  title.textContent = product.name;
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = `${money(product.price)} · остаток ${product.stock} · готово к выдаче ${product.ready_items}`
+    + ` · выдано ${product.issued_items} · отзывов ${product.reviews}`
+    + (product.rating ? ` (⭐ ${product.rating})` : "")
+    + ` · категория ${product.category}`
+    + (product.is_test ? " · 🧪 тестовый" : "");
+  const flags = document.createElement("div");
+  flags.className = "meta";
+  for (const [label, on] of [["Предзаказ", product.allow_preorder], ["Показ на полке", product.active]]) {
+    const pill = document.createElement("span");
+    pill.className = "pill " + (on ? "on" : "off");
+    pill.textContent = `${label}: ${on ? "вкл" : "выкл"}`;
+    flags.append(pill, document.createTextNode(" "));
+  }
+  if (CATEGORY_PHOTOS[product.category]) {
+    const image = document.createElement("img");
+    image.className = "thumb";
+    image.src = CATEGORY_PHOTOS[product.category];
+    image.alt = "";
+    card.append(image);
+  }
+  card.append(title, meta, flags, editRow(product), topupRow(product), toolRow(product));
+  return card;
+}
+
+function editRow(product) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.style.marginTop = "10px";
+  const fields = [
+    ["Название", "name", product.name],
+    ["Цена", "price", product.price],
+    ["Остаток", "stock", product.stock],
+    ["Описание", "description", product.description],
+  ];
+  const inputs = {};
+  for (const [label, key, value] of fields) {
+    const field = document.createElement("div");
+    field.className = "field";
+    field.style.flex = key === "description" ? "1 1 100%" : "1 1 130px";
+    const caption = document.createElement("label");
+    caption.textContent = label;
+    const input = document.createElement("input");
+    input.value = text(value);
+    input.dataset.field = key;
+    inputs[key] = input;
+    field.append(caption, input);
+    row.append(field);
+  }
+  const categoryField = document.createElement("div");
+  categoryField.className = "field";
+  categoryField.style.flex = "1 1 160px";
+  const categoryLabel = document.createElement("label");
+  categoryLabel.textContent = "Категория";
+  const select = document.createElement("select");
+  select.replaceChildren(...catalog.categories.map(category => {
+    const option = document.createElement("option");
+    option.value = category.slug;
+    option.textContent = category.name;
+    if (category.slug === product.category) option.selected = true;
+    return option;
+  }));
+  categoryField.append(categoryLabel, select);
+  row.append(categoryField);
+
+  const save = document.createElement("button");
+  save.className = "action";
+  save.type = "button";
+  save.textContent = "Сохранить";
+  save.addEventListener("click", async () => {
+    const body = {
+      name: inputs.name.value.trim(),
+      price: number(inputs.price.value, null),
+      stock: number(inputs.stock.value, null),
+      description: inputs.description.value.trim(),
+      category: select.value,
+    };
+    if (!body.name) { feedback("feedback", "Название не может быть пустым.", "error"); return; }
+    if (body.price === null || body.stock === null) { feedback("feedback", "Цена и остаток — целые числа.", "error"); return; }
+    await run(() => api("/api/admin/products/" + product.id, { method: "PATCH", body }), `Товар «${body.name}» сохранён.`);
+  });
+  row.append(save);
+  return row;
+}
+
+function topupRow(product) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.style.marginTop = "8px";
+  const area = document.createElement("textarea");
+  area.placeholder = "Автовыдача: одна строка = одна единица товара (логин:пароль, ключ, ссылка)";
+  area.style.flex = "1 1 100%";
+  const button = document.createElement("button");
+  button.className = "action";
+  button.type = "button";
+  button.textContent = "Загрузить автовыдачу";
+  button.addEventListener("click", async () => {
+    const lines = area.value.split("\n").map(line => line.trim()).filter(Boolean);
+    if (!lines.length) { feedback("feedback", "Вставь хотя бы одну строку товара.", "error"); return; }
+    const result = await run(() => api("/api/admin/products/" + product.id + "/deliveries", { method: "POST", body: { items: lines } }),
+      `Загружено ${lines.length} строк.`);
+    if (result) {
+      area.value = "";
+      feedback("feedback", `Загружено строк: ${lines.length}. Выдано предзаказам: ${result.delivered_to_preorders || 0}. На полку: ${result.stock_added || 0}.`, "ok");
+    }
+  });
+  row.append(area, button);
+  return row;
+}
+
+function toolRow(product) {
+  const row = document.createElement("div");
+  row.className = "tools";
+  row.style.marginTop = "8px";
+  const toggles = [
+    ["allow_preorder", "Предзаказ"],
+    ["is_test", "Тестовый"],
+    ["active", "Показ на полке"],
+  ];
+  for (const [field, label] of toggles) {
+    const button = document.createElement("button");
+    button.className = "ghost mini";
+    button.type = "button";
+    button.textContent = `${label}: ${product[field] ? "выключить" : "включить"}`;
+    button.addEventListener("click", () => run(() => api("/api/admin/products/" + product.id, {
+      method: "PATCH", body: { [field]: !product[field] },
+    }), `${label}: ${product[field] ? "выключено" : "включено"}.`));
+    row.append(button);
+  }
+  const remove = document.createElement("button");
+  remove.className = "danger mini";
+  remove.type = "button";
+  remove.textContent = "Удалить товар";
+  remove.addEventListener("click", async () => {
+    if (!window.confirm(`Удалить «${product.name}»? Вместе с ним уйдут остатки автовыдачи и отзывы.`)) return;
+    await run(() => api("/api/admin/products/" + product.id, { method: "DELETE" }), `Товар «${product.name}» удалён.`);
+  });
+  row.append(remove);
+  return row;
+}
+
+function renderOrders(orders) {
+  const box = $("orders");
+  if (!orders.length) { box.replaceChildren(paragraph("Заказов пока нет.", "muted")); return; }
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const label of ["№", "Покупатель", "Товары", "Сумма", "Статус", "Действия"]) {
+    const cell = document.createElement("th"); cell.textContent = label; head.append(cell);
+  }
+  table.append(head);
+  for (const order of orders) {
+    const row = document.createElement("tr");
+    const items = (order.items || []).map(item => `${item.name || "Товар"} ×${item.qty || 1}`).join(", ");
+    const cells = [order.id, order.user_id, items, money(order.total), statusTitle(order.status)];
+    for (const value of cells) {
+      const cell = document.createElement("td"); cell.textContent = text(value); row.append(cell);
+    }
+    const actions = document.createElement("td");
+    for (const [status, label, cls] of [["paid", "Оплата получена", "action"], ["done", "Выдать", "ghost"], ["cancelled", "Отменить", "danger"]]) {
+      if (status === "paid" && !["new", "preorder"].includes(order.status)) continue;
+      if (status === "done" && order.status !== "paid") continue;
+      if (status === "cancelled" && !["new", "preorder"].includes(order.status)) continue;
+      const button = document.createElement("button");
+      button.className = cls + " mini";
+      button.type = "button";
+      button.textContent = label;
+      button.style.marginRight = "6px";
+      button.addEventListener("click", () => run(() => api("/api/admin/orders/" + order.id, {
+        method: "PATCH", body: { status },
+      }), `Заказ № ${order.id}: ${statusTitle(status)}.`));
+      actions.append(button);
+    }
+    row.append(actions);
+    table.append(row);
+  }
+  box.replaceChildren(table);
+}
+
+function statusTitle(status) {
+  return { new: "ждёт оплаты", preorder: "предзаказ", paid: "оплачен", done: "выдан", cancelled: "отменён" }[status] || status;
+}
+
+function renderUsers(users) {
+  const box = $("users");
+  if (!users.length) { box.replaceChildren(paragraph("Покупателей пока нет.", "muted")); return; }
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const label of ["№", "Имя", "Telegram ID", "Баланс", "Купил на", "Заказов", "Предзаказов", "Действия"]) {
+    const cell = document.createElement("th"); cell.textContent = label; head.append(cell);
+  }
+  table.append(head);
+  for (const profile of users) {
+    const row = document.createElement("tr");
+    const cells = [profile.traveler_no, profile.name + (profile.username ? " @" + profile.username : ""),
+                   profile.user_id, money(profile.balance), money(profile.spent), profile.orders, profile.preorders];
+    for (const value of cells) {
+      const cell = document.createElement("td"); cell.textContent = text(value); row.append(cell);
+    }
+    const actions = document.createElement("td");
+    for (const amount of [500, 1000]) {
+      const button = document.createElement("button");
+      button.className = "ghost mini";
+      button.type = "button";
+      button.textContent = "+" + amount;
+      button.style.marginRight = "6px";
+      button.addEventListener("click", () => run(() => api("/api/admin/balance", {
+        method: "POST", body: { user_id: profile.user_id, amount },
+      }), `Баланс покупателя № ${profile.traveler_no} пополнен на ${money(amount)}.`));
+      actions.append(button);
+    }
+    row.append(actions);
+    table.append(row);
+  }
+  box.replaceChildren(table);
+}
+
+function renderReviews(reviews) {
+  const box = $("reviews");
+  if (!reviews.length) { box.replaceChildren(paragraph("Отзывов пока нет.", "muted")); return; }
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const label of ["Оценка", "Товар", "Заказ", "Комментарий"]) {
+    const cell = document.createElement("th"); cell.textContent = label; head.append(cell);
+  }
+  table.append(head);
+  for (const review of reviews) {
+    const row = document.createElement("tr");
+    for (const value of ["⭐ " + review.rating, review.product, review.order_id, review.text || "—"]) {
+      const cell = document.createElement("td"); cell.textContent = text(value); row.append(cell);
+    }
+    table.append(row);
+  }
+  box.replaceChildren(table);
+}
+
+async function run(request, success) {
+  feedback("feedback", "Сохраняем…");
+  try {
+    const result = await request();
+    feedback("feedback", success, "ok");
+    await loadAll();
+    return result;
+  } catch (error) {
+    feedback("feedback", error.message, "error");
+    if (/токен|доступ|401|403/i.test(error.message)) {
+      $("panel").hidden = true;
+      $("gate").hidden = false;
+    }
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------- добавление --- */
+async function createProduct() {
+  const body = {
+    name: $("new-name").value.trim(),
+    category: $("new-category").value,
+    price: number($("new-price").value, null),
+    stock: number($("new-stock").value, null),
+    description: $("new-description").value.trim(),
+    allow_preorder: $("new-preorder").checked,
+    is_test: $("new-test").checked,
+    active: true,
+  };
+  if (!body.name) { feedback("add-feedback", "Укажи название.", "error"); return; }
+  if (body.price === null || body.stock === null) { feedback("add-feedback", "Цена и остаток — целые числа.", "error"); return; }
+  feedback("add-feedback", "Создаём…");
+  try {
+    const saved = await api("/api/admin/products", { method: "POST", body });
+    feedback("add-feedback", `Товар «${body.name}» добавлен. Загрузи автовыдачу во вкладке «Товары».`, "ok");
+    await loadAll();
+    for (const id of ["new-name", "new-price", "new-stock", "new-description"]) $(id).value = "";
+    show("products");
+  } catch (error) {
+    feedback("add-feedback", error.message, "error");
+  }
+}
+
+/* ------------------------------------------------------------------ вкладки --- */
+function show(tab) {
+  for (const section of ["products", "add", "orders", "users", "reviews"]) {
+    $("tab-" + section).hidden = section !== tab;
+  }
+  for (const button of $("tabs").querySelectorAll("button")) {
+    button.setAttribute("aria-current", String(button.dataset.tab === tab));
+  }
+}
+
+$("enter").addEventListener("click", enter);
+$("token").addEventListener("keydown", event => { if (event.key === "Enter") enter(); });
+$("logout").addEventListener("click", () => {
+  panelToken = "";
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* нечего чистить */ }
+  $("token").value = "";
+  $("panel").hidden = true;
+  $("gate").hidden = false;
+  feedback("gate-feedback", "");
+});
+$("refresh").addEventListener("click", () => run(() => api("/api/admin/catalog"), "Данные обновлены."));
+$("create").addEventListener("click", createProduct);
+$("topup").addEventListener("click", async () => {
+  const user_id = number($("user-id").value, null);
+  const amount = number($("user-amount").value, null);
+  if (!user_id || !amount) { feedback("users-feedback", "Нужны Telegram ID и сумма.", "error"); return; }
+  feedback("users-feedback", "Пополняем…");
+  try {
+    const result = await api("/api/admin/balance", { method: "POST", body: { user_id, amount } });
+    feedback("users-feedback", `Баланс пополнен, теперь у покупателя ${money(result.balance)}.`, "ok");
+    await loadAll();
+  } catch (error) {
+    feedback("users-feedback", error.message, "error");
+  }
+});
+$("tabs").addEventListener("click", event => {
+  const button = event.target.closest("button[data-tab]");
+  if (button) show(button.dataset.tab);
+});
+
+restore();
+</script>
+</body>
+</html>

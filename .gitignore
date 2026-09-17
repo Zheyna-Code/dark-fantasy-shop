@@ -12,3 +12,6 @@ outputs/
 .workbuddy-ai/
 .playwright-cli/
 _check.js
+
+# Локальный инструментарий браузерных проверок (вендорится, не часть проекта)
+.workbuddy-ai/
