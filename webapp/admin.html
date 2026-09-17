@@ -66,6 +66,22 @@ tr:hover td { background: var(--panel-2); }
 .pill.off { color: var(--muted); }
 .muted { color: var(--muted); }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.product-layout { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.product-picker { position: sticky; top: 12px; max-height: calc(100vh - 36px); overflow: auto; }
+.product-picker h3 { color: var(--gold); margin-bottom: 10px; font-size: 16px; }
+.product-search { margin-bottom: 10px; }
+.product-option { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 9px; margin-bottom: 7px; }
+.product-option:hover, .product-option.selected { border-color: var(--gold); background: #30241b; }
+.product-option img { width: 44px; height: 44px; object-fit: cover; border-radius: 7px; border: 1px solid var(--line); flex: 0 0 auto; }
+.product-option-main { min-width: 0; }
+.product-option-name { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.product-option-meta { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.product-detail { min-width: 0; }
+@media (max-width: 760px) {
+  .product-layout { grid-template-columns: 1fr; }
+  .product-picker { position: static; max-height: none; }
+  .product-option { display: inline-flex; width: calc(50% - 5px); vertical-align: top; margin-right: 5px; }
+}
 .prod { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel-2); margin-bottom: 10px; }
 .prod h3 { font-size: 16px; margin-bottom: 6px; }
 .prod .meta { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
@@ -180,6 +196,8 @@ const TOKEN_KEY = "lavka-panel-token";
 const CATEGORY_PHOTOS = { chatgpt: "/static/chatgptshop.jpg", gemini: "/static/geminishop.jpg", capcut: "/static/Capcutshop.jpg" };
 let panelToken = "";
 let catalog = { categories: [], products: [] };
+let selectedProductId = null;
+let productSearch = "";
 
 function feedback(node, text, kind) {
   const box = typeof node === "string" ? $(node) : node;
@@ -277,7 +295,68 @@ function renderCategorySelect() {
 function renderProducts() {
   const box = $("products");
   if (!catalog.products.length) { box.replaceChildren(paragraph("Товаров пока нет. Добавь первый.", "muted")); return; }
-  box.replaceChildren(...catalog.products.map(product => productCard(product)));
+  if (!catalog.products.some(product => product.id === selectedProductId)) {
+    selectedProductId = catalog.products[0].id;
+  }
+  const layout = document.createElement("div");
+  layout.className = "product-layout";
+  const picker = document.createElement("aside");
+  picker.className = "product-picker card";
+  const pickerTitle = document.createElement("h3");
+  pickerTitle.textContent = `Выберите товар (${catalog.products.length})`;
+  const search = document.createElement("input");
+  search.className = "product-search";
+  search.placeholder = "Поиск по названию…";
+  search.value = productSearch;
+  search.addEventListener("input", () => {
+    productSearch = search.value;
+    renderProductPicker(picker);
+  });
+  picker.append(pickerTitle, search);
+  renderProductPicker(picker);
+  const detail = document.createElement("div");
+  detail.className = "product-detail";
+  const product = catalog.products.find(item => item.id === selectedProductId);
+  detail.append(productCard(product));
+  layout.append(picker, detail);
+  box.replaceChildren(layout);
+}
+
+function renderProductPicker(picker) {
+  const oldList = picker.querySelector(".product-option-list");
+  if (oldList) oldList.remove();
+  const list = document.createElement("div");
+  list.className = "product-option-list";
+  const query = productSearch.trim().toLocaleLowerCase("ru-RU");
+  const products = catalog.products.filter(product => !query || product.name.toLocaleLowerCase("ru-RU").includes(query));
+  if (!products.length) list.append(paragraph("Ничего не найдено.", "muted"));
+  for (const product of products) {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "product-option" + (product.id === selectedProductId ? " selected" : "");
+    if (CATEGORY_PHOTOS[product.category]) {
+      const image = document.createElement("img");
+      image.src = CATEGORY_PHOTOS[product.category];
+      image.alt = "";
+      option.append(image);
+    }
+    const main = document.createElement("span");
+    main.className = "product-option-main";
+    const name = document.createElement("span");
+    name.className = "product-option-name";
+    name.textContent = product.name;
+    const meta = document.createElement("span");
+    meta.className = "product-option-meta";
+    meta.textContent = `${money(product.price)} · остаток ${product.stock} · ${product.active ? "на полке" : "скрыт"}`;
+    main.append(name, meta);
+    option.append(main);
+    option.addEventListener("click", () => {
+      selectedProductId = product.id;
+      renderProducts();
+    });
+    list.append(option);
+  }
+  picker.append(list);
 }
 
 function paragraph(value, className) {
