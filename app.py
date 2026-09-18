@@ -28,8 +28,10 @@ if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
 # Optional group/channel where completed reviews are announced. Telegram chat IDs
 # are usually negative (for example -1001234567890); a public @username also works.
 REVIEWS_GROUP_CHAT_ID = os.environ.get("REVIEWS_GROUP_CHAT_ID", "").strip()
-# Optional channel/group where newly created products are announced.
-PRODUCTS_CHANNEL_CHAT_ID = os.environ.get("PRODUCTS_CHANNEL_CHAT_ID", "").strip()
+# Channel where newly created and restocked products are announced.
+PRODUCTS_CHANNEL_CHAT_ID = os.environ.get("PRODUCTS_CHANNEL_CHAT_ID", "@Ditzzm1337").strip()
+REQUIRED_CHANNEL = "Ditzzm1337"
+REQUIRED_CHANNEL_URL = "https://t.me/Ditzzm1337"
 PRIVACY_POLICY_URL = "https://teletype.in/@aishopditzzm/6rLg2BNAz8-"
 USER_AGREEMENT_URL = "https://teletype.in/@aishopditzzm/OniyCUsM8gt"
 WARRANTY_TERMS_URL = "https://teletype.in/@aishopditzzm/Ml2mgNp0KFk"
@@ -149,6 +151,39 @@ def menu_keyboard():
         [blue_button("⭐ Отзывы", url="https://t.me/otzivditzzm")],
         [blue_button("🛟 Техподдержка", callback_data="menu:support")],
     ])
+
+
+def subscription_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [blue_button("📜 Подписаться на канал", url=REQUIRED_CHANNEL_URL)],
+        [blue_button("✅ Проверить подписку", callback_data="subscription:check")],
+    ])
+
+
+async def is_subscribed(user_id):
+    """Telegram confirms channel membership; admins keep access for maintenance."""
+    if user_id in ADMIN_IDS:
+        return True
+    bot = active_bot.get("bot")
+    if not bot:
+        return False
+    try:
+        member = await bot.get_chat_member(f"@{REQUIRED_CHANNEL}", user_id)
+        return member.status in ("creator", "administrator", "member") or (
+            member.status == "restricted" and bool(getattr(member, "is_member", False))
+        )
+    except Exception as error:
+        log.warning("Subscription check failed for %s: %s", user_id, error)
+        return False
+
+
+async def send_subscription_gate(target):
+    caption = (
+        "<b>Добро пожаловать, странник.</b>\n\n"
+        "Перед входом в Лавку Странника подпишись на наш канал.\n"
+        "После подписки нажми «Проверить подписку» — и двери лавки откроются."
+    )
+    await send_photo(target, "1.jpg", caption, subscription_keyboard())
 
 
 def back_keyboard():
@@ -481,6 +516,9 @@ def admin_product_caption(item):
 @dp.message(CommandStart())
 @dp.message(Command("menu"))
 async def cmd_menu(message: Message):
+    if not await is_subscribed(message.from_user.id):
+        await send_subscription_gate(message)
+        return
     if message.text and message.text.startswith("/start ref_"):
         raw = message.text.split("ref_", 1)[1].split()[0]
         if raw.isdecimal():
@@ -839,9 +877,13 @@ async def upload_callback(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("menu:"))
 async def menu_callback(callback: CallbackQuery):
-    await callback.answer()
     message, user = callback.message, callback.from_user
     action = callback.data.split(":", 1)[1]
+    if not await is_subscribed(user.id):
+        await callback.answer("Сначала подпишись на канал и нажми «Проверить подписку».", show_alert=True)
+        await send_subscription_gate(message)
+        return
+    await callback.answer()
     if action in ("home", "products", "shop", "profile", "bonus"):
         add_state.pop(user.id, None)
         upload_state.pop(user.id, None)
@@ -900,6 +942,15 @@ async def menu_callback(callback: CallbackQuery):
             "Напиши нам — поможем найти верный путь.\n\n"
             f"🛡 <a href=\"{WARRANTY_TERMS_URL}\">Условия гарантии</a>",
             support_keyboard())
+
+
+@dp.callback_query(F.data == "subscription:check")
+async def subscription_check_callback(callback: CallbackQuery):
+    if await is_subscribed(callback.from_user.id):
+        await callback.answer("Подписка подтверждена.")
+        await send_menu(callback.message, callback.from_user)
+    else:
+        await callback.answer("Подписка не найдена. Подпишись на канал и проверь ещё раз.", show_alert=True)
 
 
 async def catalog_keyboard():
@@ -1609,7 +1660,7 @@ async def notify_deliveries(events):
 
 
 async def notify_restock(product, delivered=0):
-    """Фото категории + название, цена, наличие + кнопка «Купить». Рассылка идёт в фоне."""
+    """Announce a restock in the channel and notify travelers waiting for it."""
     bot = active_bot.get("bot")
     if not bot or not product:
         return 0
@@ -1618,6 +1669,18 @@ async def notify_restock(product, delivered=0):
         return 0
     filename = CATEGORY_PHOTOS.get(product["category"], "shop.jpg")
     markup = InlineKeyboardMarkup(inline_keyboard=[[blue_button("🛒 Купить", callback_data=f"product:{product['id']}")]])
+    if PRODUCTS_CHANNEL_CHAT_ID:
+        try:
+            caption = (
+                "🟢 <b>Товар пополнен</b>\n\n"
+                f"<b>{escape(str(product['name']))}</b>\n"
+                f"Цена: {int(product.get('price') or 0):,} ₽\n"
+                f"В наличии: {stock} шт."
+            )
+            await bot.send_photo(PRODUCTS_CHANNEL_CHAT_ID, photo_ref(filename), caption=caption,
+                                 parse_mode="HTML", reply_markup=markup)
+        except Exception as error:
+            log.warning("Restock channel notification failed: %s", error)
     recipients = [user_id for user_id in await store.restock_recipients() if user_id not in ADMIN_IDS]
     task = asyncio.create_task(_broadcast(bot, recipients, filename, product, markup))
     broadcast_tasks.add(task)
