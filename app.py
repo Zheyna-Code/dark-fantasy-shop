@@ -9,7 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from aiohttp import web
-from aiogram import Bot, Dispatcher, F
+from aiogram import BaseMiddleware, Bot, Dispatcher, F
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
@@ -184,6 +184,20 @@ async def send_subscription_gate(target):
         "После подписки нажми «Проверить подписку» — и двери лавки откроются."
     )
     await send_photo(target, "1.jpg", caption, subscription_keyboard())
+
+
+class SubscriptionMiddleware(BaseMiddleware):
+    """Re-check membership before every inline-button action."""
+    async def __call__(self, handler, event, data):
+        if getattr(event, "data", "") == "subscription:check":
+            return await handler(event, data)
+        user = getattr(event, "from_user", None)
+        if user and await is_subscribed(user.id):
+            return await handler(event, data)
+        await event.answer("Сначала подпишись на канал.", show_alert=True)
+        if getattr(event, "message", None):
+            await send_subscription_gate(event.message)
+        return None
 
 
 def back_keyboard():
@@ -1790,6 +1804,7 @@ async def main():
         else:
             async with Bot(BOT_TOKEN) as bot:
                 active_bot["bot"] = bot
+                dp.callback_query.outer_middleware(SubscriptionMiddleware())
                 # Only /menu is listed: /admin, /add, /id and /cancel stay hidden
                 # and answer administrators alone.
                 await bot.set_my_commands([BotCommand(command="menu", description="Открыть меню лавки")])
