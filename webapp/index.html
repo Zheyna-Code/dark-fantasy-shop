@@ -659,7 +659,6 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       }
       top.append(node("h2", "", product.name));
       card.append(top, node("p", "card-description", product.description || "Описание уточняется у хранителя."));
-      card.append(node("p", "card-warranty", `Гарантия: ${product.warranty || "уточняется у хранителя"}`));
       card.append(node("p", "card-price", product.price > 0 ? money(product.price) : "Цена не задана"));
       const footer = node("div", "card-footer");
       footer.append(node("span", product.stock > 0 ? "in-stock" : "out-of-stock", stockText(product.stock)));

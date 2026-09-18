@@ -828,7 +828,7 @@ class Store:
     async def product_reviews(self, product_id, limit=10):
         async with self.connection() as db:
             rows = await db.fetch(
-                "SELECT r.rating,r.rating_text,r.created_at,u.first_name FROM reviews r "
+                "SELECT r.rating,r.rating_text,r.created_at,u.first_name,u.username,u.user_id FROM reviews r "
                 "LEFT JOIN users u ON u.user_id=r.user_id WHERE r.product_id=$1 ORDER BY r.id DESC LIMIT $2",
                 product_id, limit,
             )
@@ -837,19 +837,25 @@ class Store:
                 product_id,
             )
         return {"reviews": [{"rating": int(row["rating"]), "text": row["rating_text"],
-                             "created_at": int(row["created_at"]), "name": row["first_name"] or "Странник"}
+                             "created_at": int(row["created_at"]),
+                             "name": row["first_name"] or (f"@{row['username']}" if row["username"] else None)
+                             or f"Покупатель #{row['user_id']}"}
                             for row in rows],
                 "count": int(summary["n"]), "average": float(summary["avg"])}
 
     async def recent_reviews(self, limit=20):
         async with self.connection() as db:
             rows = await db.fetch(
-                "SELECT r.rating,r.rating_text,r.created_at,r.order_id,p.name AS product FROM reviews r "
-                "LEFT JOIN products p ON p.id=r.product_id ORDER BY r.id DESC LIMIT $1", limit,
+                "SELECT r.rating,r.rating_text,r.created_at,r.order_id,p.name AS product, "
+                "u.first_name,u.username,u.user_id FROM reviews r "
+                "LEFT JOIN products p ON p.id=r.product_id "
+                "LEFT JOIN users u ON u.user_id=r.user_id ORDER BY r.id DESC LIMIT $1", limit,
             )
         return {"reviews": [{"rating": int(row["rating"]), "text": row["rating_text"],
                              "created_at": int(row["created_at"]), "order_id": row["order_id"],
-                             "product": row["product"] or "Товар"} for row in rows]}
+                             "product": row["product"] or "Товар",
+                             "author": row["first_name"] or (f"@{row['username']}" if row["username"] else None)
+                             or f"Покупатель #{row['user_id']}"} for row in rows]}
 
     async def _in_stock(self, db, items):
         """Auto-delivery is possible only when every position has ready lines queued."""

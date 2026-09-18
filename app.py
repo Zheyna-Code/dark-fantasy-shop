@@ -319,7 +319,6 @@ def product_caption(item):
     else:
         availability = "🔴 Нет в наличии" + (" · доступен предзаказ" if item.get("allow_preorder") else "")
     description = escape(item.get("description") or "Описание уточняется у хранителя.")
-    warranty = escape(item.get("warranty") or "Уточняется у хранителя перед оплатой.")
     price = f"{item['price']:,} ₽" if type(item.get("price")) is int and item["price"] > 0 else "Цена уточняется"
     reviews = int(item.get("reviews") or 0)
     rating_line = f"⭐ {item['rating']} · отзывов: {reviews}" if reviews and item.get("rating") else "Отзывов пока нет"
@@ -330,9 +329,8 @@ def product_caption(item):
         f"{description}\n\n"
         f"<b>Цена:</b> {price}\n"
         f"<b>Наличие:</b> {availability}\n"
-        f"<b>Гарантия:</b> {warranty}\n"
         f"<b>Оценки:</b> {rating_line}{note}\n\n"
-        "Внимательно проверь условия гарантии перед покупкой."
+        "Внимательно проверь условия покупки перед оплатой."
     )
 
 
@@ -1245,9 +1243,15 @@ async def review_callback(callback: CallbackQuery):
         try:
             quantity = int(review.get("quantity") or 1)
             product_name = escape(str(review.get("product_name") or "Товар"))
+            buyer = (
+                f"@{callback.from_user.username}"
+                if callback.from_user.username
+                else (callback.from_user.full_name or "Покупатель")
+            )
             await bot.send_message(
                 REVIEWS_GROUP_CHAT_ID,
                 "⭐ <b>Новый отзыв</b>\n\n"
+                f"Покупатель: <b>{escape(buyer)}</b>\n"
                 f"Купили: <b>{product_name}</b>\n"
                 f"Количество: <b>{quantity} шт.</b>\n"
                 f"Оценка: <b>{rating}/5</b>",
@@ -1516,7 +1520,8 @@ async def admin_callback(callback: CallbackQuery):
         lines = ["<b>⭐ Последние отзывы</b>", ""]
         if data["reviews"]:
             for review in data["reviews"]:
-                lines.append(f"⭐ {review['rating']} · {escape(str(review['product']))} · заказ № {review['order_id']}")
+                lines.append(f"⭐ {review['rating']} · {escape(str(review.get('author') or 'Покупатель'))} · "
+                             f"{escape(str(review['product']))} · заказ № {review['order_id']}")
                 if review["text"]:
                     lines.append(f"<i>{escape(review['text'][:200])}</i>")
         else:

@@ -479,6 +479,47 @@ function topupRow(product) {
     }
   });
   row.append(area, button);
+  const ready = document.createElement("div");
+  ready.style.cssText = "flex:1 1 100%; margin-top:8px";
+  ready.append(paragraph("Загружаем готовые строки…", "muted"));
+  row.append(ready);
+  api(`/api/admin/products/${product.id}/deliveries/ready`).then(data => {
+    ready.replaceChildren();
+    const items = Array.isArray(data.items) ? data.items : [];
+    const heading = document.createElement("p");
+    heading.className = "muted";
+    heading.textContent = items.length ? `Готовые строки (${items.length}):` : "Готовых строк нет.";
+    ready.append(heading);
+    for (const item of items) {
+      const line = document.createElement("div");
+      line.className = "row";
+      line.style.cssText = "margin-top:6px; align-items:center";
+      const input = document.createElement("input");
+      input.value = text(item.payload);
+      input.style.flex = "1 1 260px";
+      const replace = document.createElement("button");
+      replace.className = "ghost mini";
+      replace.type = "button";
+      replace.textContent = "Заменить";
+      replace.addEventListener("click", async () => {
+        const payload = input.value.trim();
+        if (!payload) { feedback("feedback", "Строка товара не может быть пустой.", "error"); return; }
+        await run(() => api(`/api/admin/products/${product.id}/deliveries/${item.id}`, { method: "PATCH", body: { payload } }), "Строка автовыдачи заменена.");
+      });
+      const remove = document.createElement("button");
+      remove.className = "danger mini";
+      remove.type = "button";
+      remove.textContent = "Удалить";
+      remove.addEventListener("click", async () => {
+        if (!window.confirm("Удалить эту строку автовыдачи? Остаток уменьшится на 1.")) return;
+        await run(() => api(`/api/admin/products/${product.id}/deliveries/${item.id}`, { method: "DELETE" }), "Строка автовыдачи удалена.");
+      });
+      line.append(input, replace, remove);
+      ready.append(line);
+    }
+  }).catch(error => {
+    ready.replaceChildren(paragraph("Не удалось загрузить строки автовыдачи: " + error.message, "muted"));
+  });
   return row;
 }
 
@@ -593,13 +634,13 @@ function renderReviews(reviews) {
   if (!reviews.length) { box.replaceChildren(paragraph("Отзывов пока нет.", "muted")); return; }
   const table = document.createElement("table");
   const head = document.createElement("tr");
-  for (const label of ["Оценка", "Товар", "Заказ", "Комментарий"]) {
+  for (const label of ["Оценка", "Покупатель", "Товар", "Заказ", "Комментарий"]) {
     const cell = document.createElement("th"); cell.textContent = label; head.append(cell);
   }
   table.append(head);
   for (const review of reviews) {
     const row = document.createElement("tr");
-    for (const value of ["⭐ " + review.rating, review.product, review.order_id, review.text || "—"]) {
+    for (const value of ["⭐ " + review.rating, review.author || "Покупатель", review.product, review.order_id, review.text || "—"]) {
       const cell = document.createElement("td"); cell.textContent = text(value); row.append(cell);
     }
     table.append(row);
