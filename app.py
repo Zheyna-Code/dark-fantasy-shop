@@ -32,6 +32,7 @@ REVIEWS_GROUP_CHAT_ID = os.environ.get("REVIEWS_GROUP_CHAT_ID", "").strip()
 PRODUCTS_CHANNEL_CHAT_ID = os.environ.get("PRODUCTS_CHANNEL_CHAT_ID", "").strip()
 PRIVACY_POLICY_URL = "https://teletype.in/@aishopditzzm/6rLg2BNAz8-"
 USER_AGREEMENT_URL = "https://teletype.in/@aishopditzzm/OniyCUsM8gt"
+WARRANTY_TERMS_URL = "https://teletype.in/@aishopditzzm/Ml2mgNp0KFk"
 BONUS_PERCENT = 3
 
 
@@ -159,6 +160,7 @@ def support_keyboard():
         [blue_button("🛟 Написать в поддержку", url=f"https://t.me/{SUPPORT_USERNAME}")],
         [blue_button("🔒 Политика конфиденциальности", url=PRIVACY_POLICY_URL)],
         [blue_button("📜 Пользовательское соглашение", url=USER_AGREEMENT_URL)],
+        [blue_button("🛡 Условия гарантии", url=WARRANTY_TERMS_URL)],
         [blue_button("В меню", callback_data="menu:home")],
     ])
 
@@ -895,7 +897,8 @@ async def menu_callback(callback: CallbackQuery):
         await replace_message(message,
             "<b>Хранитель лавки на связи</b>\n\n"
             "Нужна помощь с выбором нейросети, оплатой или покупкой? "
-            "Напиши нам — поможем найти верный путь.",
+            "Напиши нам — поможем найти верный путь.\n\n"
+            f"🛡 <a href=\"{WARRANTY_TERMS_URL}\">Условия гарантии</a>",
             support_keyboard())
 
 
