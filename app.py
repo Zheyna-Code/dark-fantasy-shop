@@ -117,6 +117,11 @@ last_shelf = {}
 # Telegram file ids of our own photos: uploading a 3 MB jpg on every screen is
 # the slowest part of the bot, so each picture is uploaded only once.
 photo_cache = {}
+# Successful channel-membership lookups. Calling getChatMember before every
+# button press adds a remote Telegram round trip (often several seconds).
+# The explicit "Check subscription" button always refreshes it immediately.
+subscription_cache = {}
+SUBSCRIPTION_CACHE_SECONDS = 300
 # Live bot instance for background messages; set in main().
 active_bot = {}
 # Keep strong references to background broadcasts so they are never collected.
@@ -167,18 +172,26 @@ def subscription_keyboard():
     ])
 
 
-async def is_subscribed(user_id):
+async def is_subscribed(user_id, refresh=False):
     """Telegram confirms channel membership; admins keep access for maintenance."""
     if user_id in ADMIN_IDS:
         return True
     bot = active_bot.get("bot")
     if not bot:
         return False
+    now = asyncio.get_running_loop().time()
+    if not refresh and subscription_cache.get(user_id, 0) > now:
+        return True
     try:
         member = await bot.get_chat_member(f"@{REQUIRED_CHANNEL}", user_id)
-        return member.status in ("creator", "administrator", "member") or (
+        subscribed = member.status in ("creator", "administrator", "member") or (
             member.status == "restricted" and bool(getattr(member, "is_member", False))
         )
+        if subscribed:
+            subscription_cache[user_id] = now + SUBSCRIPTION_CACHE_SECONDS
+        else:
+            subscription_cache.pop(user_id, None)
+        return subscribed
     except Exception as error:
         log.warning("Subscription check failed for %s: %s", user_id, error)
         return False
@@ -1004,7 +1017,7 @@ async def menu_callback(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "subscription:check")
 async def subscription_check_callback(callback: CallbackQuery):
-    if await is_subscribed(callback.from_user.id):
+    if await is_subscribed(callback.from_user.id, refresh=True):
         await callback.answer("Подписка подтверждена.")
         await send_menu(callback.message, callback.from_user)
     else:
