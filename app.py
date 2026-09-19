@@ -22,7 +22,7 @@ from shop_backend import ApiError, Store, register_api
 BASE_DIR = Path(__file__).resolve().parent
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")
-SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "DitzmBack").lstrip("@")
+SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "DitzzmBack").lstrip("@")
 if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
     raise ValueError("SUPPORT_USERNAME must be a Telegram username without a URL")
 # Optional group/channel where completed reviews are announced. Telegram chat IDs
@@ -48,6 +48,10 @@ def parse_admin_ids(value):
 ADMIN_IDS = parse_admin_ids(os.environ.get("ADMIN_IDS", ""))
 # Token for the full-size admin panel in a normal browser (on the site), not inside Telegram.
 ADMIN_PANEL_TOKEN = os.environ.get("ADMIN_PANEL_TOKEN", "").strip()
+# Production API token from Crypto Pay → More → Merchant API. It stays server-side.
+CRYPTO_PAY_TOKEN = os.environ.get("CRYPTO_PAY_TOKEN", "").strip()
+# Optional: only set this to the documented testnet URL while testing.
+CRYPTO_PAY_API_BASE = os.environ.get("CRYPTO_PAY_API_BASE", "").strip()
 # Testers buy test products without payment to check automatic delivery.
 TESTER_IDS = parse_admin_ids(os.environ.get("TESTER_IDS", ""))
 logging.basicConfig(level=logging.INFO)
@@ -75,7 +79,7 @@ ADD_PROMPTS = {
     "type": "Шаг 1 из 5. Это тестовый товар? Тестовый покупают тестеры без оплаты — чтобы проверить автовыдачу.",
     "name": "Шаг 2 из 5. Отправь название товара одной строкой (до 200 символов).",
     "price": "Шаг 3 из 5. Отправь цену целыми рублями (например, 590).",
-    "stock": "Шаг 4 из 5. Отправь остаток целым числом (0 — товара нет в наличии; тогда работает предзаказ).",
+    "stock": "Шаг 4 из 5. Отправь остаток целым числом (0 — товара временно нет в наличии).",
     "description": "Шаг 5 из 5. Отправь описание товара или слово «пропустить».",
 }
 EDIT_PROMPTS = {
@@ -85,14 +89,13 @@ EDIT_PROMPTS = {
     "description": "Отправь новое описание товара или слово «пропустить».",
 }
 FIELD_TITLES = {"name": "название", "price": "цену", "stock": "остаток", "description": "описание",
-                "category": "категорию", "active": "показ на полке", "allow_preorder": "предзаказ",
+                "category": "категорию", "active": "показ на полке",
                 "is_test": "тестовый товар"}
 UPLOAD_PROMPT = (
     "<b> Загрузка автовыдачи: {name}</b>\n\n"
     "Отправь одним сообщением список товара — <b>одна строка = одна единица товара</b> "
     "(логин:пароль, ключ, ссылка — до 2000 символов на строку, максимум 200 строк).\n\n"
-    "Сразу после загрузки бот выдаст товар оплаченным предзаказам по очереди, "
-    "а остаток выставит на полку и разошлёт уведомление покупателям."
+    "После загрузки остаток появится на полке, а бот разошлёт уведомление покупателям."
 )
 # Conversational product wizard: user_id -> {"slug", "step", "data", "message"}.
 add_state = {}
@@ -215,9 +218,7 @@ def support_keyboard():
 
 
 def profile_keyboard(has_preorders=False):
-    label = f"⏳ Предзаказы · {has_preorders}" if has_preorders else "⏳ Предзаказы"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [blue_button(label, callback_data="preorders")],
         [blue_button("🛟 Техподдержка", callback_data="menu:support")],
         [blue_button("В меню", callback_data="menu:home")],
     ])
@@ -368,7 +369,7 @@ def product_caption(item):
     elif stock > 0:
         availability = f"🟢 В наличии: {stock}"
     else:
-        availability = "🔴 Нет в наличии" + (" · доступен предзаказ" if item.get("allow_preorder") else "")
+        availability = "🔴 Нет в наличии"
     description = escape(item.get("description") or "Описание уточняется у хранителя.")
     price = f"{item['price']:,} ₽" if type(item.get("price")) is int and item["price"] > 0 else "Цена уточняется"
     reviews = int(item.get("reviews") or 0)
@@ -394,8 +395,6 @@ def product_keyboard(item, can_test=False, is_admin=False):
             rows.append([styled_button("🧪 Тестовая покупка без оплаты", "success", callback_data=f"buy:{item['id']}")])
     elif stock > 0:
         rows.append([styled_button("Купить", "success", callback_data=f"buy:{item['id']}")])
-    elif item.get("allow_preorder"):
-        rows.append([plain_button(" Предзаказ · предоплата 100%", callback_data=f"preorder:{item['id']}")])
     if int(item.get("reviews") or 0):
         rows.append([blue_button(f"📝 Отзывы · {int(item['reviews'])}", callback_data=f"reviews:{item['id']}")])
     if is_admin:
@@ -1135,7 +1134,7 @@ async def buy_callback(callback: CallbackQuery):
         await callback.answer("Тестовая покупка выполнена.")
         return
     if item["stock"] <= 0:
-        await callback.answer("Товар закончился. Оформи предзаказ — бот сообщит, когда он появится.", show_alert=True)
+        await callback.answer("Товар временно закончился. Следи за пополнением.", show_alert=True)
         return
     price = f"{item['price']:,} ₽"
     markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -1765,7 +1764,8 @@ async def make_app():
     application = web.Application(client_max_size=64 * 1024)
     register_api(application, store, BOT_TOKEN, ADMIN_IDS, SUPPORT_USERNAME, testers=TESTER_IDS,
                  notifier=notify_deliveries, order_notifier=web_order_notice,
-                 product_notifier=notify_new_product, panel_token=ADMIN_PANEL_TOKEN)
+                 product_notifier=notify_new_product, panel_token=ADMIN_PANEL_TOKEN,
+                 crypto_token=CRYPTO_PAY_TOKEN, crypto_api_base=CRYPTO_PAY_API_BASE)
 
     async def index(request):
         return web.FileResponse(BASE_DIR / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})
@@ -1787,8 +1787,24 @@ async def make_app():
 async def main():
     web_only = os.environ.get("WEB_ONLY", "").lower() in ("1", "true", "yes")
     if not web_only and not BOT_TOKEN:
-        raise SystemExit("Set BOT_TOKEN on the hosting service. For a local catalog preview use WEB_ONLY=1.")
-    await store.connect()
+        # A missing token must not kill the process: the hosting proxy would
+        # answer 502 Bad Gateway until the port is bound. Keep the catalog and
+        # public API up; Telegram polling stays dormant until BOT_TOKEN is set.
+        web_only = True
+        log.warning("BOT_TOKEN not set — starting in WEB_ONLY catalog mode. "
+                    "Set BOT_TOKEN on the hosting service to enable the bot.")
+    # Retry the database connection: managed Postgres (Neon/Supabase) may need
+    # a few seconds to wake up, and crashing here surfaces as 502 Bad Gateway.
+    for attempt in range(1, 6):
+        try:
+            await store.connect()
+            break
+        except Exception:
+            if attempt == 5:
+                raise
+            delay = min(attempt * 2, 10)
+            log.exception("Database connect failed (attempt %s/5), retrying in %ss", attempt, delay)
+            await asyncio.sleep(delay)
     await store.init_db()
     runner = web.AppRunner(await make_app())
     await runner.setup()

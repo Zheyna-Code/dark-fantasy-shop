@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qsl
 
 import asyncpg
-from aiohttp import web
+from aiohttp import ClientSession, ClientTimeout, web
 
 log = logging.getLogger("lavka.api")
 
@@ -157,12 +157,19 @@ CREATE TABLE IF NOT EXISTS reviews (
     order_id BIGINT NOT NULL, rating INTEGER NOT NULL, rating_text TEXT NOT NULL DEFAULT '',
     created_at BIGINT NOT NULL, UNIQUE (order_id, product_id)
 );
+CREATE TABLE IF NOT EXISTS crypto_invoices (
+    id BIGSERIAL PRIMARY KEY, payload TEXT NOT NULL UNIQUE, invoice_id TEXT UNIQUE,
+    user_id BIGINT NOT NULL, amount INTEGER NOT NULL, purpose TEXT NOT NULL,
+    order_id BIGINT, status TEXT NOT NULL DEFAULT 'new', created_at BIGINT NOT NULL,
+    paid_at BIGINT
+);
 CREATE INDEX IF NOT EXISTS orders_by_user ON orders(user_id, status);
 CREATE INDEX IF NOT EXISTS orders_by_kind ON orders(kind, status, id);
 CREATE INDEX IF NOT EXISTS deliveries_queue ON deliveries(product_id, status, id);
 CREATE INDEX IF NOT EXISTS deliveries_by_order ON deliveries(order_id);
 CREATE INDEX IF NOT EXISTS reviews_by_product ON reviews(product_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS order_retry ON orders(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS crypto_invoices_by_order ON crypto_invoices(order_id);
 """
 
 MIGRATIONS = {
@@ -262,6 +269,8 @@ class Store:
                 "FROM jsonb_array_elements(items::jsonb) AS item),0) "
                 "WHERE units=0 AND status IN ('paid','done') AND items LIKE '[%'"
             )
+            # Preorders are currently disabled shop-wide; old flags must not leave a purchase path visible.
+            await db.execute("UPDATE products SET allow_preorder=0 WHERE allow_preorder<>0")
             for slug, name in (("chatgpt", "ChatGPT"), ("gemini", "Gemini"), ("capcut", "CapCut")):
                 # Seeded per schema: a test schema must get the same three shelves.
                 await db.execute(
@@ -444,6 +453,57 @@ class Store:
             )
         return int(balance)
 
+    async def create_crypto_invoice(self, user_id, amount, purpose, order_id=None):
+        """Reserve one locally tracked Crypto Pay invoice before sending its link to a buyer."""
+        amount = integer(amount, "Сумма пополнения", 10**6, 1)
+        if purpose not in ("topup", "order"):
+            raise ApiError("Неверное назначение криптоплатежа.")
+        payload = f"lavka:{purpose}:{secrets.token_urlsafe(24)}"
+        async with self.transaction() as db:
+            await db.execute(
+                "INSERT INTO crypto_invoices(payload,user_id,amount,purpose,order_id,created_at) VALUES($1,$2,$3,$4,$5,$6)",
+                payload, user_id, amount, purpose, order_id, int(time.time()),
+            )
+        return {"payload": payload, "amount": amount}
+
+    async def bind_crypto_invoice(self, payload, invoice_id):
+        async with self.connection() as db:
+            await db.execute("UPDATE crypto_invoices SET invoice_id=$1 WHERE payload=$2", str(invoice_id), payload)
+
+    async def cancel_crypto_invoice(self, payload):
+        async with self.connection() as db:
+            await db.execute("DELETE FROM crypto_invoices WHERE payload=$1 AND status='new'", payload)
+
+    async def settle_crypto_invoice(self, payload, invoice_id=None):
+        """Idempotently credit a top-up or fulfil its already reserved order after a verified webhook."""
+        async with self.transaction() as db:
+            invoice = await db.fetchrow("SELECT * FROM crypto_invoices WHERE payload=$1 FOR UPDATE", payload)
+            if not invoice:
+                raise ApiError("Криптоинвойс не найден.", 404)
+            if invoice["invoice_id"] and invoice_id and str(invoice["invoice_id"]) != str(invoice_id):
+                raise ApiError("Номер криптоинвойса не совпадает.", 409)
+            if invoice["status"] == "paid":
+                return {"ok": True, "replayed": True}
+            if invoice["purpose"] == "topup":
+                balance = await db.fetchval(
+                    "UPDATE users SET balance=balance+$1 WHERE user_id=$2 RETURNING balance", invoice["amount"], invoice["user_id"],
+                )
+                if balance is None:
+                    raise ApiError("Покупатель не найден.", 404)
+                result = {"ok": True, "purpose": "topup", "user_id": invoice["user_id"], "amount": invoice["amount"], "balance": int(balance)}
+            else:
+                order = await db.fetchrow("SELECT * FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE", invoice["order_id"], invoice["user_id"])
+                if not order:
+                    raise ApiError("Заказ для криптоинвойса не найден.", 404)
+                if order["status"] != "new":
+                    raise ApiError("Заказ уже обработан.", 409)
+                issued = await self._try_fulfill(db, order)
+                status = "done" if issued else "paid"
+                await db.execute("UPDATE orders SET status=$1,payment='crypto' WHERE id=$2", status, order["id"])
+                result = {"ok": True, "purpose": "order", "order_id": order["id"], "user_id": order["user_id"], "total": order["total"], "status": status, "issued": issued}
+            await db.execute("UPDATE crypto_invoices SET status='paid',paid_at=$1 WHERE id=$2", int(time.time()), invoice["id"])
+            return result
+
     async def save_category(self, body, item_id=None):
         name = text(body.get("name"), "Название", 120, True)
         active = flag(body.get("active", True), "Показывать")
@@ -472,7 +532,7 @@ class Store:
                   text(body.get("warranty", ""), "Гарантия", 500),
                   integer(body.get("price", 0), "Цена"), text(body.get("category"), "Категория", 80, True),
                   integer(body.get("stock", 0), "Остаток", 10**6), flag(body.get("active", True), "Показывать"),
-                  flag(body.get("allow_preorder", False), "Предзаказ"), flag(body.get("is_test", False), "Тестовый товар"))
+                  0, flag(body.get("is_test", False), "Тестовый товар"))
         async with self.transaction() as db:
             if not await db.fetchval("SELECT id FROM categories WHERE slug=$1", values[4]):
                 raise ApiError("Сначала создай категорию.")
@@ -490,8 +550,7 @@ class Store:
 
     async def patch_product(self, item_id, fields):
         """Change a single product field from the bot admin menu."""
-        allowed = ("name", "price", "stock", "description", "warranty", "category", "active",
-                   "allow_preorder", "is_test")
+        allowed = ("name", "price", "stock", "description", "warranty", "category", "active", "is_test")
         if not fields or set(fields) - set(allowed):
             raise ApiError("Неизвестное поле товара.")
         product = await self.product(item_id)
@@ -499,6 +558,7 @@ class Store:
             raise ApiError("Товар не найден.", 404)
         body = {key: product[key] for key in
                 ("name", "description", "warranty", "price", "category", "stock", "active", "allow_preorder", "is_test")}
+        body["allow_preorder"] = False
         # PostgreSQL INTEGER flag columns come back as 0/1. save_product()
         # deliberately accepts real booleans only, so normalize untouched flags
         # before rebuilding the complete product payload.
@@ -988,8 +1048,9 @@ async def api_errors(request, handler):
 
 
 def register_api(app, store, bot_token, admin_ids, support_username, testers=(), notifier=None,
-                 order_notifier=None, product_notifier=None, panel_token=""):
+                 order_notifier=None, product_notifier=None, panel_token="", crypto_token="", crypto_api_base=""):
     testers = set(testers)
+    crypto_api_base = (crypto_api_base or "https://app.tgpaycrypto.com/pay/api").rstrip("/")
     app.middlewares.append(api_errors)
 
     def optional_user(request):
@@ -1022,6 +1083,31 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
                 log.warning("Delivery notice failed: %s", error)
         return result
 
+    async def issue_crypto_invoice(user_id, amount, purpose, order_id=None):
+        if not crypto_token:
+            raise ApiError("Криптооплата пока не настроена. Укажи CRYPTO_PAY_TOKEN на хостинге.", 503)
+        local = await store.create_crypto_invoice(user_id, amount, purpose, order_id)
+        description = "Пополнение баланса Лавки Странника" if purpose == "topup" else f"Заказ № {order_id} в Лавке Странника"
+        request_data = {"fiat": "RUB", "amount": str(amount), "accepted_assets": "USDT,TON,TRX", "description": description,
+                        "payload": local["payload"], "expires_in": 3600}
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=15)) as session:
+                async with session.post(crypto_api_base + "/createInvoice", json=request_data,
+                                        headers={"TgPayCrypto-API-Token": crypto_token}) as response:
+                    data = await response.json(content_type=None)
+            result = data.get("result") if isinstance(data, dict) else None
+            if not isinstance(result, dict) or not result.get("pay_url"):
+                raise ApiError("Crypto Pay не создал счёт. Проверь токен и настройки Merchant API.", 502)
+            await store.bind_crypto_invoice(local["payload"], result.get("invoice_id"))
+            return {"ok": True, "pay_url": result["pay_url"], "invoice_id": result.get("invoice_id"), "amount": amount}
+        except ApiError:
+            await store.cancel_crypto_invoice(local["payload"])
+            raise
+        except Exception as error:
+            log.warning("Crypto Pay invoice creation failed: %s", error)
+            await store.cancel_crypto_invoice(local["payload"])
+            raise ApiError("Не удалось создать криптосчёт. Повтори попытку позже.", 502)
+
     async def body(request):
         try:
             value = await request.json()
@@ -1051,6 +1137,7 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
 
     async def config(request):
         return web.json_response({"currency": "RUB", "payment_enabled": True, "support_username": support_username,
+                                  "crypto_enabled": bool(crypto_token),
                                   "images": {"menu": "/static/bg.jpg", "profile": "/static/2.jpg",
                                              "support": "/static/shop.jpg"}})
 
@@ -1076,10 +1163,10 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
     async def topup(request):
         user = authenticate(request)
         payload = await body(request)
-        amount = payload.get("amount")
-        if amount not in (100, 250, 500, 1000, 1500):
-            raise ApiError("Выбери доступную сумму пополнения.")
+        amount = integer(payload.get("amount"), "Сумма пополнения", 10**6, 10)
         await store.profile(user, user["id"] in admin_ids)
+        if payload.get("payment") == "crypto":
+            return web.json_response(await issue_crypto_invoice(user["id"], amount, "topup"))
         return web.json_response({
             "ok": True,
             "amount": amount,
@@ -1159,12 +1246,37 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
             raise ApiError("Тестовые покупки доступны только тестерам лавки.", 403)
         await store.profile(user, user["id"] in admin_ids)
         result = await store.create_order(user["id"], payload)
+        if payload.get("payment") == "crypto" and not result.get("replayed"):
+            result.update(await issue_crypto_invoice(user["id"], result["total"], "order", result["order_id"]))
         if order_notifier and payload.get("payment", "manual") == "manual" and not result.get("replayed"):
             try:
                 await order_notifier(user, result)
             except Exception as error:
                 log.warning("Order notice failed: %s", error)
         return web.json_response(await deliver(result))
+
+    async def crypto_webhook(request):
+        if not crypto_token:
+            raise web.HTTPNotFound()
+        raw = await request.read()
+        signature = (request.headers.get("TgPayCrypto-API-Signature") or request.headers.get("TgCryptoPay-API-Signature")
+                     or request.headers.get("Crypto-Pay-API-Signature") or "")
+        key = hashlib.sha256(crypto_token.encode()).digest()
+        expected = hmac.new(key, raw, hashlib.sha256).hexdigest()
+        if not signature or not hmac.compare_digest(signature, expected):
+            raise ApiError("Неверная подпись Crypto Pay.", 401)
+        try:
+            event = json.loads(raw)
+            invoice = event.get("payload") if isinstance(event, dict) else None
+            payload = invoice.get("payload") if isinstance(invoice, dict) else None
+            invoice_id = invoice.get("invoice_id") if isinstance(invoice, dict) else None
+        except (ValueError, AttributeError):
+            raise ApiError("Неверный webhook Crypto Pay.")
+        if event.get("update_type") != "invoice_paid" or not isinstance(payload, str):
+            return web.json_response({"ok": True})
+        result = await store.settle_crypto_invoice(payload, invoice_id)
+        await deliver(result)
+        return web.json_response({"ok": True})
 
     async def admin_users(request):
         authenticate(request, True)
@@ -1190,7 +1302,7 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         web.get("/api/catalog", catalog), web.get("/api/products", legacy_products),
         web.get("/api/config", config), web.get("/api/me", me), web.get("/api/history", history),
         web.post("/api/favorites/{id}", favorite), web.post("/api/support/tickets", ticket),
-        web.post("/api/wallet/topup", topup), web.post("/api/order", order),
+        web.post("/api/wallet/topup", topup), web.post("/api/order", order), web.post("/api/payments/crypto/webhook", crypto_webhook),
         web.get("/api/admin/stats", stats),
         web.get("/api/admin/catalog", admin_catalog), web.get("/api/admin/orders", orders),
         web.post("/api/admin/categories", categories), web.patch("/api/admin/categories/{id}", categories),

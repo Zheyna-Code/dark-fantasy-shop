@@ -359,10 +359,11 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <p class="eyebrow">Кошель странника</p><h1 id="wallet-title" tabindex="-1">Кошелёк</h1>
       <p>Баланс</p><p class="wallet-balance" id="wallet-balance">—</p>
       <p id="wallet-login">Баланс доступен после входа через Telegram.</p>
-      <p id="payment-note">Пополнение баланса согласуй с поддержкой. Заказы оплачиваются с баланса.</p>
+      <p id="payment-note">Пополняй баланс криптой или оплати заказ с баланса либо Crypto Pay.</p>
       <div class="form-actions" id="topup-actions">
         <button class="action" type="button" data-topup="100">100 ₽</button><button class="action" type="button" data-topup="250">250 ₽</button><button class="action" type="button" data-topup="500">500 ₽</button><button class="action" type="button" data-topup="1000">1000 ₽</button><button class="action" type="button" data-topup="1500">1500 ₽</button>
       </div>
+      <div class="form-actions"><label>Своя сумма, ₽<input id="custom-topup" type="number" inputmode="numeric" min="10" max="1000000" step="1" placeholder="Например, 750"></label><button class="action primary" type="button" id="custom-topup-button">Пополнить криптой</button></div>
       <p class="feedback" id="wallet-feedback" role="status" aria-live="polite"></p>
     </section>
     <section class="page-panel" id="view-support" data-page="support" aria-labelledby="support-title" hidden>
@@ -374,7 +375,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       <button class="action primary" type="button" id="send-support">Отправить обращение</button>
       <p class="feedback" id="support-feedback" role="status"></p>
       <a class="action support-link" href="https://teletype.in/@aishopditzzm/Ml2mgNp0KFk" target="_blank" rel="noopener noreferrer">🛡 Условия гарантии</a>
-      <a class="action primary support-link" href="https://t.me/DitzmBack" target="_blank" rel="noopener noreferrer">@DitzmBack</a>
+      <a class="action primary support-link" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer">@DitzzmBack</a>
     </section>
     <section class="page-panel" id="view-admin" data-page="admin" aria-labelledby="admin-title" hidden>
       <button class="action" type="button" data-view="catalog">К каталогу</button>
@@ -421,10 +422,10 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   <h2 id="order-title">Подтверждение заказа</h2>
   <p id="order-summary"></p>
   <p id="order-explanation">После подтверждения сумма будет списана с твоего баланса.</p>
-  <div class="form-actions" id="payment-methods" hidden><button class="action primary" type="button" data-payment="balance">Оплатить с баланса</button></div>
+  <div class="form-actions" id="payment-methods" hidden><button class="action primary" type="button" data-payment="balance">С баланса</button><button class="action" type="button" data-payment="crypto">Crypto Pay</button></div>
   <p id="order-feedback" class="feedback" role="status" aria-live="polite"></p>
   <div class="form-actions"><button class="action primary" id="confirm-order" type="button">Оплатить заказ</button><button class="action" id="cancel-order" type="button">Отмена</button></div>
-  <a class="action support-link" id="order-support" href="https://t.me/DitzmBack" target="_blank" rel="noopener noreferrer" hidden>@DitzmBack</a>
+  <a class="action support-link" id="order-support" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer" hidden>@DitzzmBack</a>
 </dialog>
 <script>
 (() => {
@@ -537,7 +538,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
         $("payment-note").textContent = data.payment_enabled
           ? "Оплата товаров списывается с баланса Telegram-кошелька."
           : "Оплата временно недоступна. Обратись в поддержку.";
-        const username = typeof data.support_username === "string" && /^[A-Za-z0-9_]{5,32}$/.test(data.support_username) ? data.support_username : "DitzmBack";
+        const username = typeof data.support_username === "string" && /^[A-Za-z0-9_]{5,32}$/.test(data.support_username) ? data.support_username : "DitzzmBack";
         document.querySelectorAll(".support-link").forEach(link => { link.href = "https://t.me/" + username; link.textContent = "@" + username; });
         setArt("hero-image", data.images?.menu, "/static/bg.jpg", "hero-fallback");
         setArt("profile-image", data.images?.profile || "/static/2.jpg", "/static/bg.jpg", "profile-fallback");
@@ -796,8 +797,14 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   }
   async function topup(amount) {
     if (!me || !initData()) return;
-    const username = config?.support_username || "DitzmBack";
-    feedback("wallet-feedback", `Для пополнения на ${money(amount)} напиши администратору @${username}. Оплата и зачисление проходят в боте.`);
+    if (!Number.isInteger(amount) || amount < 10 || amount > 1000000) { feedback("wallet-feedback", "Укажи сумму от 10 до 1 000 000 ₽.", true); return; }
+    feedback("wallet-feedback", "Создаём криптосчёт…");
+    try {
+      const result = await api("/api/wallet/topup", { method: "POST", auth: true, body: { amount, payment: "crypto" } });
+      if (!result.pay_url) throw new Error("Сервис не вернул ссылку для оплаты.");
+      feedback("wallet-feedback", "Счёт открыт в Crypto Pay. После оплаты баланс обновится автоматически.");
+      if (app?.openLink) app.openLink(result.pay_url); else window.open(result.pay_url, "_blank", "noopener");
+    } catch (error) { feedback("wallet-feedback", message(error), true); }
   }
   async function loadHistory() {
     if (!me || !initData()) return;
@@ -859,17 +866,17 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       orderIntent = orderKeys.get(signature);
       orderIntent.signature = signature;
       orderIntent.done = false;
-      selectedPayment = kind === "order" ? "manual" : "manual";
-      $("order-title").textContent = kind === "test" ? "Тестовая покупка" : "Счёт в боте";
+      selectedPayment = kind === "order" ? "balance" : "balance";
+      $("order-title").textContent = kind === "test" ? "Тестовая покупка" : "Оплата заказа";
       $("order-summary").textContent = `${orderIntent.product.name}\n1 шт. · ${money(orderIntent.product.price)}${kind === "test" ? "\nТестовый режим: оплата не требуется." : ""}`;
       $("order-explanation").textContent = kind === "test"
         ? "Тестовая покупка без оплаты: после подтверждения бот автоматически отправит товар в чат."
-        : "Нажми подтверждение — бот откроет счёт в чате. Оплата и выдача пройдут уже в боте.";
-      $("payment-methods").hidden = true;
+        : "Выбери оплату с баланса или через Crypto Pay. Товар будет выдан после подтверждения оплаты.";
+      $("payment-methods").hidden = kind === "test";
       document.querySelectorAll("[data-payment]").forEach(button => button.classList.toggle("primary", button.dataset.payment === selectedPayment));
       feedback("order-feedback", orderIntent.attempted ? "Предыдущая попытка не подтверждена. Повтор использует тот же ключ, чтобы не создать дубликат." : "");
       $("confirm-order").hidden = false; $("confirm-order").disabled = false;
-      $("confirm-order").textContent = kind === "test" ? "Подтвердить тест" : (orderIntent.attempted ? "Повторить счёт" : "Открыть счёт в боте");
+      $("confirm-order").textContent = kind === "test" ? "Подтвердить тест" : (orderIntent.attempted ? "Повторить оплату" : "Оплатить");
       $("cancel-order").textContent = "Отмена"; $("cancel-order").disabled = false;
       $("order-support").hidden = true;
       dialog.showModal();
@@ -894,13 +901,16 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     feedback("order-feedback", "Проводим оплату…");
     intent.attempted = true;
     try {
-      const result = await api("/api/order", { method: "POST", auth: true, body: { cart: [{ id: intent.product.id, qty: 1 }], kind: intent.kind, payment: intent.kind === "test" ? "balance" : "manual", comment: "", idempotency_key: intent.key } });
+      const result = await api("/api/order", { method: "POST", auth: true, body: { cart: [{ id: intent.product.id, qty: 1 }], kind: intent.kind, payment: intent.kind === "test" ? "balance" : selectedPayment, comment: "", idempotency_key: intent.key } });
       intent.done = true;
       orderKeys.delete(intent.signature);
       const id = result?.id ?? result?.order_id ?? result?.order?.id;
-      feedback("order-feedback", intent.kind === "test"
+      if (selectedPayment === "crypto" && result.pay_url) {
+        feedback("order-feedback", `Счёт${id != null ? " № " + String(id) : ""} открыт в Crypto Pay. После оплаты товар будет выдан автоматически.`);
+        if (app?.openLink) app.openLink(result.pay_url); else window.open(result.pay_url, "_blank", "noopener");
+      } else feedback("order-feedback", intent.kind === "test"
         ? `Тестовая покупка${id != null ? " № " + String(id) : ""} выполнена. Бот отправил товар тебе в чат.`
-        : `Счёт${id != null ? " № " + String(id) : ""} создан. Открой чат с ботом — там будут способы оплаты.`);
+        : `Заказ${id != null ? " № " + String(id) : ""} оплачен с баланса и будет выдан автоматически.`);
       $("confirm-order").hidden = true;
       $("cancel-order").textContent = "Закрыть";
       $("order-support").hidden = true;
@@ -1043,7 +1053,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     const name = field("name").value.trim(), category = field("category").value;
     if (!name || !integer(price) || !integer(stock) || !adminCategories.some(item => item.slug === category)) { feedback("product-feedback", "Укажи название, категорию, целую неотрицательную цену и остаток.", true); return; }
     const creating = editingProduct === null;
-    const payload = { name, description: field("description").value.trim(), warranty: field("warranty").value.trim(), price, category, stock, active: creating ? true : field("active").checked, allow_preorder: true };
+    const payload = { name, description: field("description").value.trim(), warranty: field("warranty").value.trim(), price, category, stock, active: creating ? true : field("active").checked, allow_preorder: false };
     await saveAdmin(creating ? "/api/admin/products" : `/api/admin/products/${encodeURIComponent(editingProduct)}`, creating ? "POST" : "PATCH", payload, "product-feedback", resetProduct);
   });
   $("reset-category").addEventListener("click", () => { if (!adminBusy && !adminRequest) { resetCategory(); feedback("category-feedback"); } });
@@ -1054,10 +1064,11 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   $("refresh-profile").addEventListener("click", loadMe);
   $("confirm-order").addEventListener("click", submitOrder);
   document.querySelectorAll("[data-payment]").forEach(button => button.addEventListener("click", () => {
-    selectedPayment = "balance";
+    selectedPayment = button.dataset.payment;
     document.querySelectorAll("[data-payment]").forEach(item => item.classList.toggle("primary", item === button));
   }));
   document.querySelectorAll("[data-topup]").forEach(button => button.addEventListener("click", () => topup(Number(button.dataset.topup))));
+  $("custom-topup-button").addEventListener("click", () => topup(Number($("custom-topup").value)));
   $("cancel-order").addEventListener("click", () => { if (!orderBusy) dialog.close(); });
   dialog.addEventListener("cancel", event => { if (orderBusy) event.preventDefault(); });
   dialog.addEventListener("close", () => {

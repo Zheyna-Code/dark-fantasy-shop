@@ -47,7 +47,7 @@ button.danger { background: var(--red); color: #fff; border: 0; border-radius: 8
 button.mini { padding: 6px 10px; font-size: 13px; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-height: 82px; }
 .stat b { display: block; font-size: 22px; color: var(--gold); }
 .stat span { color: var(--muted); font-size: 13px; }
 table { width: 100%; border-collapse: collapse; margin-top: 8px; }
@@ -78,9 +78,24 @@ tr:hover td { background: var(--panel-2); }
 .product-option-meta { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
 .product-detail { min-width: 0; }
 @media (max-width: 760px) {
+  .wrap { padding: 16px 12px 42px; }
+  h1 { font-size: 23px; }
+  .panel-actions { width: 100%; }
+  .panel-actions button { flex: 1; }
   .product-layout { grid-template-columns: 1fr; }
   .product-picker { position: static; max-height: none; }
   .product-option { display: inline-flex; width: calc(50% - 5px); vertical-align: top; margin-right: 5px; }
+  .scroll { max-height: none; overflow: visible; }
+  table.responsive, table.responsive tbody, table.responsive tr, table.responsive td { display: block; width: 100%; }
+  table.responsive { margin-top: 0; }
+  table.responsive tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  table.responsive tr:first-child { display: none; }
+  table.responsive td { display: grid; grid-template-columns: minmax(95px, 38%) 1fr; gap: 8px; border: 0; padding: 4px 0; font-size: 13px; }
+  table.responsive td::before { content: attr(data-label); color: var(--muted); font-size: 12px; }
+  table.responsive td:last-child { display: block; padding-top: 9px; }
+  table.responsive td:last-child::before { display: none; }
+  .table-tools .field { max-width: none; flex-basis: 100%; }
+  .count { margin-left: 0; padding-bottom: 0; }
 }
 .prod { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel-2); margin-bottom: 10px; }
 .prod h3 { font-size: 16px; margin-bottom: 6px; }
@@ -88,6 +103,16 @@ tr:hover td { background: var(--panel-2); }
 .prod .tools { display: flex; flex-wrap: wrap; gap: 6px; }
 img.thumb { width: 100%; max-width: 220px; border-radius: 10px; border: 1px solid var(--line); }
 .scroll { max-height: 480px; overflow: auto; }
+.panel-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.last-update { color: var(--muted); font-size: 12px; }
+.table-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 0 0 10px; }
+.table-tools .field { max-width: 280px; }
+.count { color: var(--muted); font-size: 13px; margin-left: auto; padding-bottom: 9px; }
+.status { display: inline-block; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; font-size: 12px; }
+.status.new, .status.preorder { color: #e7c87d; border-color: #7c6137; }
+.status.paid { color: #8fd6a4; border-color: var(--green); }
+.status.done { color: var(--muted); }
+.status.cancelled { color: #ef9a90; border-color: var(--red); }
 </style>
 </head>
 <body>
@@ -113,7 +138,8 @@ img.thumb { width: 100%; max-width: 220px; border-radius: 10px; border: 1px soli
         <p class="eyebrow">Лавка Странника</p>
         <h1>Управление лавкой</h1>
       </div>
-      <div class="row">
+      <div class="panel-actions">
+        <span class="last-update" id="last-update">Данные ещё не загружены</span>
         <button class="ghost" id="refresh" type="button">Обновить</button>
         <button class="ghost" id="logout" type="button">Выйти</button>
       </div>
@@ -150,7 +176,6 @@ img.thumb { width: 100%; max-width: 220px; border-radius: 10px; border: 1px soli
           <div class="field" style="flex:1 1 100%"><label for="new-description">Описание</label><textarea id="new-description" maxlength="4000"></textarea></div>
         </div>
         <div class="row" style="margin-top:10px">
-          <label><input type="checkbox" id="new-preorder" checked style="width:auto"> Разрешить предзаказ при нулевом остатке</label>
           <label><input type="checkbox" id="new-test" style="width:auto"> Тестовый товар (виден тестерам)</label>
         </div>
         <div class="row" style="margin-top:12px">
@@ -164,6 +189,11 @@ img.thumb { width: 100%; max-width: 220px; border-radius: 10px; border: 1px soli
     <section id="tab-orders" hidden>
       <h2>Заказы</h2>
       <p class="muted">«Оплата получена» зачисляет заказ и сразу выдаёт товар автоматически.</p>
+      <div class="table-tools card">
+        <div class="field"><label for="order-search">Поиск</label><input id="order-search" placeholder="№ заказа, Telegram ID или товар"></div>
+        <div class="field"><label for="order-status">Статус</label><select id="order-status"><option value="">Все статусы</option><option value="new">Ждут оплаты</option><option value="preorder">Предзаказы</option><option value="paid">Оплачены</option><option value="done">Выданы</option><option value="cancelled">Отменены</option></select></div>
+        <span class="count" id="orders-count"></span>
+      </div>
       <div class="scroll" id="orders"></div>
     </section>
 
@@ -179,6 +209,10 @@ img.thumb { width: 100%; max-width: 220px; border-radius: 10px; border: 1px soli
         <button class="action" id="topup" type="button">Пополнить баланс</button>
       </div>
       <p class="feedback" id="users-feedback" role="status" aria-live="polite"></p>
+      <div class="table-tools card">
+        <div class="field"><label for="user-search">Поиск покупателя</label><input id="user-search" placeholder="Имя, @username или Telegram ID"></div>
+        <span class="count" id="users-count"></span>
+      </div>
       <div class="scroll" id="users"></div>
     </section>
 
@@ -198,6 +232,8 @@ let panelToken = "";
 let catalog = { categories: [], products: [] };
 let selectedProductId = null;
 let productSearch = "";
+let allOrders = [];
+let allUsers = [];
 
 function feedback(node, text, kind) {
   const box = typeof node === "string" ? $(node) : node;
@@ -256,9 +292,12 @@ async function loadAll() {
   renderStats(stats);
   renderCategorySelect();
   renderProducts();
-  renderOrders(orders.orders || []);
-  renderUsers(users.users || []);
+  allOrders = orders.orders || [];
+  allUsers = users.users || [];
+  renderOrders();
+  renderUsers();
   renderReviews(reviews.reviews || []);
+  $("last-update").textContent = "Обновлено: " + new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
 function renderStats(stats) {
@@ -380,7 +419,7 @@ function productCard(product) {
     + (product.is_test ? " · 🧪 тестовый" : "");
   const flags = document.createElement("div");
   flags.className = "meta";
-  for (const [label, on] of [["Предзаказ", product.allow_preorder], ["Показ на полке", product.active]]) {
+  for (const [label, on] of [["Показ на полке", product.active]]) {
     const pill = document.createElement("span");
     pill.className = "pill " + (on ? "on" : "off");
     pill.textContent = `${label}: ${on ? "вкл" : "выкл"}`;
@@ -475,7 +514,7 @@ function topupRow(product) {
       `Загружено ${lines.length} строк.`);
     if (result) {
       area.value = "";
-      feedback("feedback", `Загружено строк: ${lines.length}. Выдано предзаказам: ${result.delivered_to_preorders || 0}. На полку: ${result.stock_added || 0}.`, "ok");
+      feedback("feedback", `Загружено строк: ${lines.length}. На полку: ${result.stock_added || 0}.`, "ok");
     }
   });
   row.append(area, button);
@@ -528,7 +567,6 @@ function toolRow(product) {
   row.className = "tools";
   row.style.marginTop = "8px";
   const toggles = [
-    ["allow_preorder", "Предзаказ"],
     ["is_test", "Тестовый"],
     ["active", "Показ на полке"],
   ];
@@ -554,10 +592,18 @@ function toolRow(product) {
   return row;
 }
 
-function renderOrders(orders) {
+function renderOrders() {
   const box = $("orders");
-  if (!orders.length) { box.replaceChildren(paragraph("Заказов пока нет.", "muted")); return; }
+  const query = $("order-search").value.trim().toLocaleLowerCase("ru-RU");
+  const status = $("order-status").value;
+  const orders = allOrders.filter(order => {
+    const haystack = [order.id, order.user_id, ...(order.items || []).map(item => item.name)].join(" ").toLocaleLowerCase("ru-RU");
+    return (!status || order.status === status) && (!query || haystack.includes(query));
+  });
+  $("orders-count").textContent = `Показано: ${orders.length} из ${allOrders.length}`;
+  if (!orders.length) { box.replaceChildren(paragraph(allOrders.length ? "Заказы по этому фильтру не найдены." : "Заказов пока нет.", "muted")); return; }
   const table = document.createElement("table");
+  table.className = "responsive";
   const head = document.createElement("tr");
   for (const label of ["№", "Покупатель", "Товары", "Сумма", "Статус", "Действия"]) {
     const cell = document.createElement("th"); cell.textContent = label; head.append(cell);
@@ -566,11 +612,16 @@ function renderOrders(orders) {
   for (const order of orders) {
     const row = document.createElement("tr");
     const items = (order.items || []).map(item => `${item.name || "Товар"} ×${item.qty || 1}`).join(", ");
-    const cells = [order.id, order.user_id, items, money(order.total), statusTitle(order.status)];
-    for (const value of cells) {
-      const cell = document.createElement("td"); cell.textContent = text(value); row.append(cell);
+    const cells = [["№", order.id], ["Покупатель", order.user_id], ["Товары", items], ["Сумма", money(order.total)], ["Статус", order.status]];
+    for (const [label, value] of cells) {
+      const cell = document.createElement("td"); cell.dataset.label = label;
+      if (label === "Статус") {
+        const badge = document.createElement("span"); badge.className = "status " + value; badge.textContent = statusTitle(value); cell.append(badge);
+      } else cell.textContent = text(value);
+      row.append(cell);
     }
     const actions = document.createElement("td");
+    actions.dataset.label = "Действия";
     for (const [status, label, cls] of [["paid", "Оплата получена", "action"], ["done", "Выдать", "ghost"], ["cancelled", "Отменить", "danger"]]) {
       if (status === "paid" && !["new", "preorder"].includes(order.status)) continue;
       if (status === "done" && order.status !== "paid") continue;
@@ -595,10 +646,14 @@ function statusTitle(status) {
   return { new: "ждёт оплаты", preorder: "предзаказ", paid: "оплачен", done: "выдан", cancelled: "отменён" }[status] || status;
 }
 
-function renderUsers(users) {
+function renderUsers() {
   const box = $("users");
-  if (!users.length) { box.replaceChildren(paragraph("Покупателей пока нет.", "muted")); return; }
+  const query = $("user-search").value.trim().toLocaleLowerCase("ru-RU");
+  const users = allUsers.filter(profile => !query || [profile.name, profile.username, profile.user_id, profile.traveler_no].join(" ").toLocaleLowerCase("ru-RU").includes(query));
+  $("users-count").textContent = `Показано: ${users.length} из ${allUsers.length}`;
+  if (!users.length) { box.replaceChildren(paragraph(allUsers.length ? "Покупатели по этому запросу не найдены." : "Покупателей пока нет.", "muted")); return; }
   const table = document.createElement("table");
+  table.className = "responsive";
   const head = document.createElement("tr");
   for (const label of ["№", "Имя", "Telegram ID", "Баланс", "Купил на", "Заказов", "Предзаказов", "Действия"]) {
     const cell = document.createElement("th"); cell.textContent = label; head.append(cell);
@@ -606,12 +661,13 @@ function renderUsers(users) {
   table.append(head);
   for (const profile of users) {
     const row = document.createElement("tr");
-    const cells = [profile.traveler_no, profile.name + (profile.username ? " @" + profile.username : ""),
-                   profile.user_id, money(profile.balance), money(profile.spent), profile.orders, profile.preorders];
-    for (const value of cells) {
-      const cell = document.createElement("td"); cell.textContent = text(value); row.append(cell);
+    const cells = [["№", profile.traveler_no], ["Имя", profile.name + (profile.username ? " @" + profile.username : "")],
+                   ["Telegram ID", profile.user_id], ["Баланс", money(profile.balance)], ["Купил на", money(profile.spent)], ["Заказов", profile.orders], ["Предзаказов", profile.preorders]];
+    for (const [label, value] of cells) {
+      const cell = document.createElement("td"); cell.dataset.label = label; cell.textContent = text(value); row.append(cell);
     }
     const actions = document.createElement("td");
+    actions.dataset.label = "Действия";
     for (const amount of [500, 1000]) {
       const button = document.createElement("button");
       button.className = "ghost mini";
@@ -673,7 +729,7 @@ async function createProduct() {
     price: number($("new-price").value, null),
     stock: number($("new-stock").value, null),
     description: $("new-description").value.trim(),
-    allow_preorder: $("new-preorder").checked,
+    allow_preorder: false,
     is_test: $("new-test").checked,
     active: true,
   };
@@ -712,6 +768,9 @@ $("logout").addEventListener("click", () => {
   feedback("gate-feedback", "");
 });
 $("refresh").addEventListener("click", () => run(() => api("/api/admin/catalog"), "Данные обновлены."));
+$("order-search").addEventListener("input", renderOrders);
+$("order-status").addEventListener("change", renderOrders);
+$("user-search").addEventListener("input", renderUsers);
 $("create").addEventListener("click", createProduct);
 $("topup").addEventListener("click", async () => {
   const user_id = number($("user-id").value, null);
