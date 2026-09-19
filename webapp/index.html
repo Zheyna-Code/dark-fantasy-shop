@@ -811,7 +811,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     try {
       const result = await api("/api/wallet/topup", { method: "POST", auth: true, body: { amount, payment: "crypto" } });
       if (!result.pay_url) throw new Error("Сервис не вернул ссылку для оплаты.");
-      feedback("wallet-feedback", `Счёт открыт: к оплате ${money(result.amount)} с комиссией Crypto Pay 3%. На баланс поступит ${money(result.credit_amount)}.`);
+      feedback("wallet-feedback", `Счёт открыт: к оплате ${money(result.amount)}. На баланс поступит ${money(result.credit_amount)}.`);
       if (app?.openLink) app.openLink(result.pay_url); else window.open(result.pay_url, "_blank", "noopener");
     } catch (error) { feedback("wallet-feedback", message(error), true); }
   }
@@ -915,7 +915,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       orderKeys.delete(intent.signature);
       const id = result?.id ?? result?.order_id ?? result?.order?.id;
       if (selectedPayment === "crypto" && result.pay_url) {
-        feedback("order-feedback", `Счёт${id != null ? " № " + String(id) : ""} открыт: к оплате ${money(result.amount)} с комиссией Crypto Pay 3%. После оплаты товар будет выдан автоматически.`);
+        feedback("order-feedback", `Счёт${id != null ? " № " + String(id) : ""} открыт: к оплате ${money(result.amount)}. После оплаты товар будет выдан автоматически.`);
         if (app?.openLink) app.openLink(result.pay_url); else window.open(result.pay_url, "_blank", "noopener");
       } else feedback("order-feedback", intent.kind === "test"
         ? `Тестовая покупка${id != null ? " № " + String(id) : ""} выполнена. Бот отправил товар тебе в чат.`

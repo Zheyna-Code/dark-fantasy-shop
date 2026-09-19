@@ -1110,7 +1110,7 @@ async def wallet_payment_callback(callback: CallbackQuery):
             await callback.message.answer(error.message, parse_mode="HTML")
             return
         await replace_message(callback.message,
-            f"<b>💠 Криптопополнение · {amount} ₽</b>\n\nК оплате: <b>{charged_amount} ₽</b> (комиссия Crypto Pay 3% включена). Баланс зачислится на <b>{amount} ₽</b> после подтверждения оплаты.",
+            f"<b>💠 Криптопополнение · {amount} ₽</b>\n\nК оплате: <b>{charged_amount} ₽</b>. Баланс зачислится на <b>{amount} ₽</b> после подтверждения оплаты.",
             InlineKeyboardMarkup(inline_keyboard=[[blue_button("Оплатить в Crypto Pay", url=url)], [blue_button("⬅️ К кошельку", callback_data="menu:wallet")]]))
         return
     await replace_message(
@@ -1352,7 +1352,7 @@ async def payment_callback(callback: CallbackQuery):
             return
         await callback.answer("Счёт Crypto Pay создан")
         await replace_message(callback.message,
-            f"<b>💠 Счёт № {result['order_id']}</b>\n\nТовар: <b>{result['total']:,} ₽</b>\nК оплате: <b>{charged_amount:,} ₽</b> (комиссия Crypto Pay 3% включена). После оплаты товар будет выдан автоматически.",
+            f"<b>💠 Счёт № {result['order_id']}</b>\n\nТовар: <b>{result['total']:,} ₽</b>\nК оплате: <b>{charged_amount:,} ₽</b>. После оплаты товар будет выдан автоматически.",
             InlineKeyboardMarkup(inline_keyboard=[[blue_button("Оплатить в Crypto Pay", url=url)], [blue_button("В меню", callback_data="menu:home")]]))
         return
     await callback.answer("Заказ оплачен с баланса")
