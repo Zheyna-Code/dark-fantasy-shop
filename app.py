@@ -9,7 +9,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from aiohttp import ClientSession, ClientTimeout, web
-from aiogram import BaseMiddleware, Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
@@ -54,11 +54,6 @@ if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
 REVIEWS_GROUP_CHAT_ID = os.environ.get("REVIEWS_GROUP_CHAT_ID", "").strip()
 # Channel where newly created and restocked products are announced.
 PRODUCTS_CHANNEL_CHAT_ID = os.environ.get("PRODUCTS_CHANNEL_CHAT_ID", "@Ditzzm1337").strip()
-# The bot must be an administrator in this channel to query other members.
-# A numeric ID is preferred for private channels; public channels may use @username.
-REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "Ditzzm1337").strip().lstrip("@")
-REQUIRED_CHANNEL_CHAT_ID = os.environ.get("REQUIRED_CHANNEL_CHAT_ID", f"@{REQUIRED_CHANNEL}").strip()
-REQUIRED_CHANNEL_URL = os.environ.get("REQUIRED_CHANNEL_URL", f"https://t.me/{REQUIRED_CHANNEL}").strip()
 PRIVACY_POLICY_URL = "https://teletype.in/@aishopditzzm/6rLg2BNAz8-"
 USER_AGREEMENT_URL = "https://teletype.in/@aishopditzzm/OniyCUsM8gt"
 WARRANTY_TERMS_URL = "https://teletype.in/@aishopditzzm/Ml2mgNp0KFk"
@@ -144,11 +139,6 @@ last_shelf = {}
 # Telegram file ids of our own photos: uploading a 3 MB jpg on every screen is
 # the slowest part of the bot, so each picture is uploaded only once.
 photo_cache = {}
-# Successful channel-membership lookups. Calling getChatMember before every
-# button press adds a remote Telegram round trip (often several seconds).
-# The explicit "Check subscription" button always refreshes it immediately.
-subscription_cache = {}
-SUBSCRIPTION_CACHE_SECONDS = 300
 # Live bot instance for background messages; set in main().
 active_bot = {}
 # Keep strong references to background broadcasts so they are never collected.
@@ -209,68 +199,6 @@ def menu_keyboard():
         [blue_button("⭐ Отзывы", url="https://t.me/otzivditzzm")],
         [blue_button("🛟 Техподдержка", callback_data="menu:support")],
     ])
-
-
-def subscription_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [blue_button("📜 Подписаться на канал", url=REQUIRED_CHANNEL_URL)],
-        [blue_button("✅ Проверить подписку", callback_data="subscription:check")],
-    ])
-
-
-async def is_subscribed(user_id, refresh=False):
-    """Telegram confirms channel membership; admins keep access for maintenance."""
-    if user_id in ADMIN_IDS:
-        return True
-    bot = active_bot.get("bot")
-    if not bot:
-        return False
-    now = asyncio.get_running_loop().time()
-    if not refresh and subscription_cache.get(user_id, 0) > now:
-        return True
-    try:
-        member = await bot.get_chat_member(REQUIRED_CHANNEL_CHAT_ID, user_id)
-        subscribed = member.status in ("creator", "administrator", "member") or (
-            member.status == "restricted" and bool(getattr(member, "is_member", False))
-        )
-        if subscribed:
-            subscription_cache[user_id] = now + SUBSCRIPTION_CACHE_SECONDS
-        else:
-            subscription_cache.pop(user_id, None)
-        return subscribed
-    except TelegramBadRequest as error:
-        log.warning(
-            "Subscription check failed for %s in %s: %s. "
-            "Make the bot an administrator in the channel and set REQUIRED_CHANNEL_CHAT_ID.",
-            user_id, REQUIRED_CHANNEL_CHAT_ID, error,
-        )
-        return False
-    except Exception as error:
-        log.warning("Subscription check failed for %s in %s: %s", user_id, REQUIRED_CHANNEL_CHAT_ID, error)
-        return False
-
-
-async def send_subscription_gate(target):
-    caption = (
-        "<b>Добро пожаловать, странник.</b>\n\n"
-        "Перед входом в Лавку Странника подпишись на наш канал.\n"
-        "После подписки нажми «Проверить подписку» — и двери лавки откроются."
-    )
-    await send_photo(target, "1.jpg", caption, subscription_keyboard())
-
-
-class SubscriptionMiddleware(BaseMiddleware):
-    """Re-check membership before every inline-button action."""
-    async def __call__(self, handler, event, data):
-        if getattr(event, "data", "") == "subscription:check":
-            return await handler(event, data)
-        user = getattr(event, "from_user", None)
-        if user and await is_subscribed(user.id):
-            return await handler(event, data)
-        await event.answer("Сначала подпишись на канал.", show_alert=True)
-        if getattr(event, "message", None):
-            await send_subscription_gate(event.message)
-        return None
 
 
 def back_keyboard():
@@ -646,9 +574,6 @@ def admin_product_caption(item):
 @dp.message(CommandStart())
 @dp.message(Command("menu"))
 async def cmd_menu(message: Message):
-    if not await is_subscribed(message.from_user.id):
-        await send_subscription_gate(message)
-        return
     if message.text and message.text.startswith("/start ref_"):
         raw = message.text.split("ref_", 1)[1].split()[0]
         if raw.isdecimal():
@@ -1009,10 +934,6 @@ async def upload_callback(callback: CallbackQuery):
 async def menu_callback(callback: CallbackQuery):
     message, user = callback.message, callback.from_user
     action = callback.data.split(":", 1)[1]
-    if not await is_subscribed(user.id):
-        await callback.answer("Сначала подпишись на канал и нажми «Проверить подписку».", show_alert=True)
-        await send_subscription_gate(message)
-        return
     await callback.answer()
     if action in ("home", "products", "shop", "profile", "bonus"):
         add_state.pop(user.id, None)
@@ -1076,23 +997,12 @@ async def menu_callback(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "subscription:check")
 async def subscription_check_callback(callback: CallbackQuery):
-    # A callback query expires quickly. A membership lookup can take several
-    # seconds, so acknowledge the button before doing the Telegram API call.
     try:
         await callback.answer()
     except TelegramBadRequest as error:
-        # The user may have pressed an old button. There is no valid callback
-        # query left to answer, but the update itself should not crash polling.
         if "query is too old" not in str(error).lower() and "query id is invalid" not in str(error).lower():
-            log.warning("Could not acknowledge subscription callback: %s", error)
-
-    if await is_subscribed(callback.from_user.id, refresh=True):
-        await send_menu(callback.message, callback.from_user)
-    else:
-        await callback.message.answer(
-            "Подписка не найдена. Подпишись на канал и нажми «Проверить подписку» ещё раз.",
-            reply_markup=subscription_keyboard(),
-        )
+            log.warning("Could not acknowledge legacy subscription callback: %s", error)
+    await send_menu(callback.message, callback.from_user)
 
 
 async def catalog_keyboard():
@@ -2058,7 +1968,6 @@ async def main():
         else:
             async with Bot(BOT_TOKEN) as bot:
                 active_bot["bot"] = bot
-                dp.callback_query.outer_middleware(SubscriptionMiddleware())
                 # Only /menu is listed: /admin, /add, /id and /cancel stay hidden
                 # and answer administrators alone.
                 # Some Telegram bot accounts reject frozen menu-management methods
