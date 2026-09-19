@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
-from aiohttp import web
+from aiohttp import ClientSession, ClientTimeout, web
 from aiogram import BaseMiddleware, Bot, Dispatcher, F
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
@@ -118,6 +118,7 @@ photo_cache = {}
 active_bot = {}
 # Keep strong references to background broadcasts so they are never collected.
 broadcast_tasks = set()
+wallet_amount_state = {}
 
 
 def blue_button(label, **action):
@@ -238,6 +239,7 @@ def wallet_keyboard():
         [blue_button("💳 Пополнить 100 ₽", callback_data="wallet:100"), blue_button("💳 Пополнить 250 ₽", callback_data="wallet:250")],
         [blue_button("Пополнить 500 ₽", callback_data="wallet:500"), blue_button("Пополнить 1000 ₽", callback_data="wallet:1000")],
         [blue_button("Пополнить 1500 ₽", callback_data="wallet:1500")],
+        [blue_button("✏️ Своя сумма", callback_data="wallet:custom")],
         [blue_button("В меню", callback_data="menu:home")],
     ])
 
@@ -245,8 +247,39 @@ def wallet_keyboard():
 def wallet_methods_keyboard(amount):
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button(f"🧾 Оплата админу · {amount} ₽", callback_data=f"walletpay:{amount}:admin")],
+        [blue_button(f"💠 Crypto Pay · {amount} ₽", callback_data=f"walletpay:{amount}:crypto")],
         [blue_button("⬅️ Назад к суммам", callback_data="menu:wallet")],
     ])
+
+
+async def crypto_invoice(user_id, amount, purpose, order_id=None):
+    """Create a Crypto Bot invoice for bot UI; fulfillment remains webhook-only."""
+    if not CRYPTO_PAY_TOKEN:
+        raise ApiError("Криптооплата ещё не настроена.", 503)
+    local = await store.create_crypto_invoice(user_id, amount, purpose, order_id)
+    description = "Пополнение баланса Лавки Странника" if purpose == "topup" else f"Заказ № {order_id} в Лавке Странника"
+    request_data = {"currency_type": "fiat", "fiat": "RUB", "amount": str(amount), "accepted_assets": "USDT,TON,TRX",
+                    "description": description, "payload": local["payload"], "expires_in": 3600}
+    base = (CRYPTO_PAY_API_BASE or "https://pay.crypt.bot/api").rstrip("/")
+    try:
+        async with ClientSession(timeout=ClientTimeout(total=15)) as session:
+            async with session.post(base + "/createInvoice", json=request_data,
+                                    headers={"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}) as response:
+                data = await response.json(content_type=None)
+        result = data.get("result") if isinstance(data, dict) else None
+        pay_url = (result.get("bot_invoice_url") or result.get("mini_app_invoice_url") or result.get("web_app_invoice_url")
+                   or result.get("pay_url")) if isinstance(result, dict) else None
+        if not pay_url:
+            raise ApiError("Crypto Pay не создал счёт. Проверь токен приложения.", 502)
+        await store.bind_crypto_invoice(local["payload"], result.get("invoice_id"))
+        return pay_url
+    except ApiError:
+        await store.cancel_crypto_invoice(local["payload"])
+        raise
+    except Exception as error:
+        log.warning("Crypto Pay bot invoice creation failed: %s", error)
+        await store.cancel_crypto_invoice(local["payload"])
+        raise ApiError("Не удалось создать криптосчёт. Попробуй позже.", 502)
 
 
 def cancel_keyboard():
@@ -976,6 +1009,11 @@ async def catalog_keyboard():
 @dp.callback_query(F.data.startswith("wallet:"))
 async def wallet_topup_callback(callback: CallbackQuery):
     value = callback.data.split(":", 1)[1]
+    if value == "custom":
+        wallet_amount_state[callback.from_user.id] = callback.message
+        await callback.answer()
+        await replace_message(callback.message, "<b>Своя сумма пополнения</b>\n\nОтправь сумму целыми рублями: от 10 до 1 000 000 ₽.\n\nОтмена — /cancel.", back_keyboard())
+        return
     if not value.isdecimal() or int(value) not in (100, 250, 500, 1000, 1500):
         await callback.answer("Недоступная сумма.", show_alert=True)
         return
@@ -992,10 +1030,21 @@ async def wallet_payment_callback(callback: CallbackQuery):
     except (ValueError, TypeError):
         await callback.answer()
         return
-    if method != "admin":
-        await callback.answer("Выбери оплату через администратора.", show_alert=True)
+    if amount < 10 or amount > 10**6 or method not in ("admin", "crypto"):
+        await callback.answer("Недоступная сумма или способ оплаты.", show_alert=True)
         return
     await callback.answer()
+    if method == "crypto":
+        try:
+            await store.profile(callback.from_user.model_dump(), callback.from_user.id in ADMIN_IDS)
+            url = await crypto_invoice(callback.from_user.id, amount, "topup")
+        except ApiError as error:
+            await callback.message.answer(error.message, parse_mode="HTML")
+            return
+        await replace_message(callback.message,
+            f"<b>💠 Криптопополнение · {amount} ₽</b>\n\nОткрой счёт и оплати его в Crypto Bot. Баланс зачислится автоматически после подтверждения оплаты.",
+            InlineKeyboardMarkup(inline_keyboard=[[blue_button("Оплатить в Crypto Pay", url=url)], [blue_button("⬅️ К кошельку", callback_data="menu:wallet")]]))
+        return
     await replace_message(
         callback.message,
         f"<b>🧾 Пополнение кошелька · {amount} ₽</b>\n\n"
@@ -1006,6 +1055,17 @@ async def wallet_payment_callback(callback: CallbackQuery):
             [blue_button("⬅️ Назад к кошельку", callback_data="menu:wallet")],
         ]),
     )
+
+
+@dp.message(F.text, ~F.text.startswith("/"), lambda message: message.from_user.id in wallet_amount_state)
+async def wallet_custom_amount_message(message: Message):
+    raw = message.text.strip().replace(" ", "")
+    target = wallet_amount_state.pop(message.from_user.id, None)
+    if not raw.isdecimal() or not 10 <= int(raw) <= 10**6:
+        await message.answer("Нужна целая сумма от 10 до 1 000 000 ₽. Нажми /cancel для отмены.")
+        return
+    amount = int(raw)
+    await replace_message(target or message, f"<b>Пополнение баланса · {amount} ₽</b>\n\nВыбери способ оплаты:", wallet_methods_keyboard(amount))
 
 
 @dp.callback_query(F.data.startswith("category:"))
@@ -1139,6 +1199,7 @@ async def buy_callback(callback: CallbackQuery):
     price = f"{item['price']:,} ₽"
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [blue_button(f"💰 Баланс · {price}", callback_data=f"pay:{item['id']}:balance")],
+        [blue_button(f"💠 Crypto Pay · {price}", callback_data=f"pay:{item['id']}:crypto")],
         [blue_button("🧾 Оплата через администратора", url=f"https://t.me/{SUPPORT_USERNAME}")],
         [styled_button("⬅️ Назад", "danger", callback_data=f"product:{item['id']}")],
     ])
@@ -1202,17 +1263,29 @@ async def payment_callback(callback: CallbackQuery):
     except (ValueError, TypeError):
         await callback.answer()
         return
-    if payment in ("crypto", "sbp"):
-        await callback.answer("Этот способ оплаты скоро будет доступен.", show_alert=True)
+    if payment not in ("balance", "crypto"):
+        await callback.answer("Этот способ оплаты недоступен.", show_alert=True)
         return
     item = await store.product(product_id)
     if not item or not item["active"] or item.get("is_test"):
         await callback.answer("Товар больше не найден.", show_alert=True)
         return
     try:
-        result = await store.create_order(callback.from_user.id, {"cart": [{"id": product_id, "qty": 1}], "kind": "order", "payment": "balance", "idempotency_key": uuid4().hex, "comment": ""})
+        result = await store.create_order(callback.from_user.id, {"cart": [{"id": product_id, "qty": 1}], "kind": "order", "payment": payment, "idempotency_key": uuid4().hex, "comment": ""})
     except ApiError as error:
         await callback.answer(error.message, show_alert=True)
+        return
+    if payment == "crypto":
+        try:
+            url = await crypto_invoice(callback.from_user.id, result["total"], "order", result["order_id"])
+        except ApiError as error:
+            await store.change_order(result["order_id"], "cancelled")
+            await callback.answer(error.message, show_alert=True)
+            return
+        await callback.answer("Счёт Crypto Pay создан")
+        await replace_message(callback.message,
+            f"<b>💠 Счёт № {result['order_id']}</b>\n\nСумма: <b>{result['total']:,} ₽</b>. После оплаты товар будет выдан автоматически.",
+            InlineKeyboardMarkup(inline_keyboard=[[blue_button("Оплатить в Crypto Pay", url=url)], [blue_button("В меню", callback_data="menu:home")]]))
         return
     await callback.answer("Заказ оплачен с баланса")
     if result.get("issued"):

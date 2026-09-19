@@ -1050,7 +1050,9 @@ async def api_errors(request, handler):
 def register_api(app, store, bot_token, admin_ids, support_username, testers=(), notifier=None,
                  order_notifier=None, product_notifier=None, panel_token="", crypto_token="", crypto_api_base=""):
     testers = set(testers)
-    crypto_api_base = (crypto_api_base or "https://app.tgpaycrypto.com/pay/api").rstrip("/")
+    # Crypto Bot tokens are issued for the official Crypto Pay API. A separate
+    # base is accepted only for the documented testnet endpoint.
+    crypto_api_base = (crypto_api_base or "https://pay.crypt.bot/api").rstrip("/")
     app.middlewares.append(api_errors)
 
     def optional_user(request):
@@ -1088,18 +1090,19 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
             raise ApiError("Криптооплата пока не настроена. Укажи CRYPTO_PAY_TOKEN на хостинге.", 503)
         local = await store.create_crypto_invoice(user_id, amount, purpose, order_id)
         description = "Пополнение баланса Лавки Странника" if purpose == "topup" else f"Заказ № {order_id} в Лавке Странника"
-        request_data = {"fiat": "RUB", "amount": str(amount), "accepted_assets": "USDT,TON,TRX", "description": description,
+        request_data = {"currency_type": "fiat", "fiat": "RUB", "amount": str(amount), "accepted_assets": "USDT,TON,TRX", "description": description,
                         "payload": local["payload"], "expires_in": 3600}
         try:
             async with ClientSession(timeout=ClientTimeout(total=15)) as session:
                 async with session.post(crypto_api_base + "/createInvoice", json=request_data,
-                                        headers={"TgPayCrypto-API-Token": crypto_token}) as response:
+                                        headers={"Crypto-Pay-API-Token": crypto_token}) as response:
                     data = await response.json(content_type=None)
             result = data.get("result") if isinstance(data, dict) else None
-            if not isinstance(result, dict) or not result.get("pay_url"):
+            pay_url = result.get("mini_app_invoice_url") or result.get("bot_invoice_url") or result.get("web_app_invoice_url") or result.get("pay_url") if isinstance(result, dict) else None
+            if not pay_url:
                 raise ApiError("Crypto Pay не создал счёт. Проверь токен и настройки Merchant API.", 502)
             await store.bind_crypto_invoice(local["payload"], result.get("invoice_id"))
-            return {"ok": True, "pay_url": result["pay_url"], "invoice_id": result.get("invoice_id"), "amount": amount}
+            return {"ok": True, "pay_url": pay_url, "invoice_id": result.get("invoice_id"), "amount": amount}
         except ApiError:
             await store.cancel_crypto_invoice(local["payload"])
             raise
@@ -1159,6 +1162,14 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         user = authenticate(request)
         payload = await body(request)
         return web.json_response(await store.create_ticket(user["id"], payload.get("text", "")))
+
+    async def review(request):
+        user = authenticate(request)
+        payload = await body(request)
+        order_id = integer(payload.get("order_id"), "Заказ", 2**63 - 1, 1)
+        product_id = integer(payload.get("product_id"), "Товар", 2**63 - 1, 1)
+        rating = integer(payload.get("rating"), "Оценка", 5, 1)
+        return web.json_response(await store.add_review(user["id"], order_id, product_id, rating, payload.get("text", "")))
 
     async def topup(request):
         user = authenticate(request)
@@ -1247,7 +1258,12 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         await store.profile(user, user["id"] in admin_ids)
         result = await store.create_order(user["id"], payload)
         if payload.get("payment") == "crypto" and not result.get("replayed"):
-            result.update(await issue_crypto_invoice(user["id"], result["total"], "order", result["order_id"]))
+            try:
+                result.update(await issue_crypto_invoice(user["id"], result["total"], "order", result["order_id"]))
+            except ApiError:
+                # No invoice means no customer could pay: release the stock reservation immediately.
+                await store.change_order(result["order_id"], "cancelled")
+                raise
         if order_notifier and payload.get("payment", "manual") == "manual" and not result.get("replayed"):
             try:
                 await order_notifier(user, result)
@@ -1301,7 +1317,7 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         web.get("/api/admin/reviews", admin_reviews),
         web.get("/api/catalog", catalog), web.get("/api/products", legacy_products),
         web.get("/api/config", config), web.get("/api/me", me), web.get("/api/history", history),
-        web.post("/api/favorites/{id}", favorite), web.post("/api/support/tickets", ticket),
+        web.post("/api/favorites/{id}", favorite), web.post("/api/support/tickets", ticket), web.post("/api/reviews", review),
         web.post("/api/wallet/topup", topup), web.post("/api/order", order), web.post("/api/payments/crypto/webhook", crypto_webhook),
         web.get("/api/admin/stats", stats),
         web.get("/api/admin/catalog", admin_catalog), web.get("/api/admin/orders", orders),
