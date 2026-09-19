@@ -21,7 +21,25 @@ from shop_backend import ApiError, Store, register_api
 
 BASE_DIR = Path(__file__).resolve().parent
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-WEBAPP_URL = os.environ.get("WEBAPP_URL", "").strip().rstrip("/")
+# An explicitly configured URL wins. Some hosts expose their generated public
+# address at runtime, so recognize those safe, non-secret variables as a
+# fallback and report the selected source once during startup.
+PUBLIC_URL_ENV_NAMES = (
+    "WEBAPP_URL", "INFRLO_PUBLIC_URL", "INFRLO_EXTERNAL_URL", "INFRLO_URL",
+    "RENDER_EXTERNAL_URL", "PUBLIC_URL", "SERVICE_URL", "APP_URL",
+)
+
+
+def configured_public_url():
+    for name in PUBLIC_URL_ENV_NAMES:
+        value = os.environ.get(name, "").strip().rstrip("/")
+        parsed = urlsplit(value)
+        if parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password:
+            return value, name
+    return "", ""
+
+
+WEBAPP_URL, WEBAPP_URL_SOURCE = configured_public_url()
 SUPPORT_USERNAME = os.environ.get("SUPPORT_USERNAME", "DitzzmBack").lstrip("@")
 if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
     raise ValueError("SUPPORT_USERNAME must be a Telegram username without a URL")
@@ -1950,6 +1968,12 @@ async def expire_crypto_reservations():
 
 
 async def main():
+    if WEBAPP_URL:
+        log.info("Public Web App URL: %s (from %s)", WEBAPP_URL, WEBAPP_URL_SOURCE)
+    else:
+        log.warning(
+            "Public Web App URL is not configured. Set WEBAPP_URL; the hosting platform did not expose a usable public URL."
+        )
     web_only = os.environ.get("WEB_ONLY", "").lower() in ("1", "true", "yes")
     if not web_only and not BOT_TOKEN:
         # A missing token must not kill the process: the hosting proxy would
