@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS support_tickets (
 CREATE TABLE IF NOT EXISTS reviews (
     id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, product_id BIGINT NOT NULL,
     order_id BIGINT NOT NULL, rating INTEGER NOT NULL, rating_text TEXT NOT NULL DEFAULT '',
-    created_at BIGINT NOT NULL, UNIQUE (order_id, product_id)
+    created_at BIGINT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS crypto_invoices (
     id BIGSERIAL PRIMARY KEY, payload TEXT NOT NULL UNIQUE, invoice_id TEXT UNIQUE,
@@ -271,6 +271,8 @@ class Store:
             )
             # Preorders are currently disabled shop-wide; old flags must not leave a purchase path visible.
             await db.execute("UPDATE products SET allow_preorder=0 WHERE allow_preorder<>0")
+            # Reviews are a feed: a buyer may leave several reviews for the same purchase.
+            await db.execute("ALTER TABLE reviews DROP CONSTRAINT IF EXISTS reviews_order_id_product_id_key")
             for slug, name in (("chatgpt", "ChatGPT"), ("gemini", "Gemini"), ("capcut", "CapCut")):
                 # Seeded per schema: a test schema must get the same three shelves.
                 await db.execute(
@@ -878,7 +880,7 @@ class Store:
                 "recent_issued": [{"payload": row["payload"], "order_id": row["order_id"]} for row in issued]}
 
     async def add_review(self, user_id, order_id, product_id, rating, rating_text=""):
-        """One review per purchased item: leaving it again updates the previous one."""
+        """Append a review for a purchased item; prior reviews remain visible."""
         rating = integer(rating, "Оценка", 5, 1)
         rating_text = text(rating_text, "Отзыв", 1000)
         async with self.transaction() as db:
@@ -895,9 +897,7 @@ class Store:
             if not purchased:
                 raise ApiError("В этом заказе такого товара нет.", 409)
             await db.execute(
-                "INSERT INTO reviews(user_id,product_id,order_id,rating,rating_text,created_at) "
-                "VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT (order_id,product_id) DO UPDATE SET "
-                "rating=EXCLUDED.rating, rating_text=EXCLUDED.rating_text, created_at=EXCLUDED.created_at",
+                "INSERT INTO reviews(user_id,product_id,order_id,rating,rating_text,created_at) VALUES($1,$2,$3,$4,$5,$6)",
                 user_id, product_id, order_id, rating, rating_text, int(time.time()),
             )
         return {
