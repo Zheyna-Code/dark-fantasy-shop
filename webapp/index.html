@@ -920,7 +920,6 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       } else feedback("order-feedback", intent.kind === "test"
         ? `Тестовая покупка${id != null ? " № " + String(id) : ""} выполнена. Бот отправил товар тебе в чат.`
         : `Заказ${id != null ? " № " + String(id) : ""} оплачен с баланса и будет выдан автоматически.`);
-      if (id != null && result.issued?.length) renderReviewPrompt(Number(id), intent.product.id);
       $("confirm-order").hidden = true;
       $("cancel-order").textContent = "Закрыть";
       $("order-support").hidden = true;
@@ -936,30 +935,6 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       $("cancel-order").disabled = false;
       if (dialog.open) (intent.done ? $("cancel-order") : $("confirm-order")).focus();
     }
-  }
-
-  function renderReviewPrompt(orderId, productId) {
-    const prompt = document.createElement("div");
-    prompt.className = "review-prompt";
-    prompt.append(node("p", "", "Как тебе покупка? Оставь оценку:"));
-    const actions = node("div", "form-actions");
-    for (let rating = 1; rating <= 5; rating += 1) {
-      const button = node("button", "action", "⭐ " + rating);
-      button.type = "button";
-      button.addEventListener("click", async () => {
-        actions.querySelectorAll("button").forEach(item => { item.disabled = true; });
-        try {
-          await api("/api/reviews", { method: "POST", auth: true, body: { order_id: orderId, product_id: productId, rating } });
-          prompt.replaceChildren(node("p", "", `Спасибо! Оценка ${rating}/5 сохранена.`));
-        } catch (error) {
-          feedback("order-feedback", message(error), true);
-          actions.querySelectorAll("button").forEach(item => { item.disabled = false; });
-        }
-      });
-      actions.append(button);
-    }
-    prompt.append(actions);
-    $("order-feedback").after(prompt);
   }
 
   function syncAdminControls() {

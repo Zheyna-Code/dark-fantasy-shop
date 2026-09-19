@@ -1190,14 +1190,6 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         payload = await body(request)
         return web.json_response(await store.create_ticket(user["id"], payload.get("text", "")))
 
-    async def review(request):
-        user = authenticate(request)
-        payload = await body(request)
-        order_id = integer(payload.get("order_id"), "Заказ", 2**63 - 1, 1)
-        product_id = integer(payload.get("product_id"), "Товар", 2**63 - 1, 1)
-        rating = integer(payload.get("rating"), "Оценка", 5, 1)
-        return web.json_response(await store.add_review(user["id"], order_id, product_id, rating, payload.get("text", "")))
-
     async def topup(request):
         user = authenticate(request)
         payload = await body(request)
@@ -1344,7 +1336,7 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         web.get("/api/admin/reviews", admin_reviews),
         web.get("/api/catalog", catalog), web.get("/api/products", legacy_products),
         web.get("/api/config", config), web.get("/api/me", me), web.get("/api/history", history),
-        web.post("/api/favorites/{id}", favorite), web.post("/api/support/tickets", ticket), web.post("/api/reviews", review),
+        web.post("/api/favorites/{id}", favorite), web.post("/api/support/tickets", ticket),
         web.post("/api/wallet/topup", topup), web.post("/api/order", order), web.post("/api/payments/crypto/webhook", crypto_webhook),
         web.get("/api/admin/stats", stats),
         web.get("/api/admin/catalog", admin_catalog), web.get("/api/admin/orders", orders),
