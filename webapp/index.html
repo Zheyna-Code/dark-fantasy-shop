@@ -447,6 +447,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   const initData = () => window.Telegram?.WebApp?.initData || "";
   const isAdmin = () => Boolean(initData() && me?.is_admin === true);
   const requestedCategory = new URLSearchParams(location.search).get("category");
+  const requestedProductId = Number(new URLSearchParams(location.search).get("product"));
   let categories = [], products = [], selectedProvider = providers.has(requestedCategory) ? requestedCategory : null, activeIndex = 0;
   let catalogReady = false, catalogLoaded = false, catalogRequest = null;
   let config = null, configRequest = null, me = null, meRequest = null;
@@ -721,10 +722,18 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
         categories = data.categories.filter(category => category && typeof category.slug === "string" && category.active !== false && category.active !== 0);
         const slugs = new Set(categories.map(category => category.slug));
         products = data.products.filter(product => product && product.id != null && enabled(product.active) && slugs.has(product.category)).map(product => ({ ...product, active: true, stock: integer(product.stock) ? product.stock : 0, price: integer(product.price) ? product.price : 0, allow_preorder: enabled(product.allow_preorder), is_test: enabled(product.is_test) }));
+        const requestedProduct = Number.isSafeInteger(requestedProductId) && requestedProductId > 0
+          ? products.find(product => Number(product.id) === requestedProductId) : null;
+        if (requestedProduct) {
+          selectedProvider = requestedProduct.category;
+          activeIndex = Math.max(0, availableProducts().findIndex(product => product.id === requestedProduct.id));
+        }
         catalogReady = true; catalogLoaded = true;
         if (selectedProvider && !slugs.has(selectedProvider) && !providers.has(selectedProvider)) selectedProvider = null;
-        const index = availableProducts().findIndex(product => product.id === oldId);
-        activeIndex = Math.max(0, index);
+        if (!requestedProduct) {
+          const index = availableProducts().findIndex(product => product.id === oldId);
+          activeIndex = Math.max(0, index);
+        }
         $("catalog-notice").hidden = true;
         $("retry-catalog").hidden = true;
       } catch (error) {

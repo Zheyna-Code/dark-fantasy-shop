@@ -211,6 +211,14 @@ def back_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[blue_button("В меню", callback_data="menu:home")]])
 
 
+def webapp_product_url(product_id):
+    """Public deep link used in channel posts; channel callbacks cannot open a private bot session."""
+    if not WEBAPP_URL:
+        return ""
+    query = urlencode({"product": str(product_id)})
+    return f"{WEBAPP_URL}/?{query}"
+
+
 def support_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [blue_button("🛟 Написать в поддержку", url=f"https://t.me/{SUPPORT_USERNAME}")],
@@ -1758,7 +1766,9 @@ async def notify_restock(product, delivered=0):
     if stock <= 0:
         return 0
     filename = CATEGORY_PHOTOS.get(product["category"], "shop.jpg")
-    markup = InlineKeyboardMarkup(inline_keyboard=[[blue_button("🛒 Купить", callback_data=f"product:{product['id']}")]])
+    private_markup = InlineKeyboardMarkup(inline_keyboard=[[blue_button("🛒 Купить", callback_data=f"product:{product['id']}")]])
+    channel_url = webapp_product_url(product["id"])
+    channel_markup = InlineKeyboardMarkup(inline_keyboard=[[blue_button("🛒 Купить в лавке", url=channel_url)]]) if channel_url else None
     if PRODUCTS_CHANNEL_CHAT_ID:
         try:
             caption = (
@@ -1768,11 +1778,11 @@ async def notify_restock(product, delivered=0):
                 f"В наличии: {stock} шт."
             )
             await bot.send_photo(PRODUCTS_CHANNEL_CHAT_ID, photo_ref(filename), caption=caption,
-                                 parse_mode="HTML", reply_markup=markup)
+                                 parse_mode="HTML", reply_markup=channel_markup)
         except Exception as error:
             log.warning("Restock channel notification failed: %s", error)
     recipients = [user_id for user_id in await store.restock_recipients() if user_id not in ADMIN_IDS]
-    task = asyncio.create_task(_broadcast(bot, recipients, filename, product, markup))
+    task = asyncio.create_task(_broadcast(bot, recipients, filename, product, private_markup))
     broadcast_tasks.add(task)
     task.add_done_callback(broadcast_tasks.discard)
     return len(recipients)
@@ -1795,7 +1805,9 @@ async def notify_new_product(product):
             f"Цена: <b>{price}</b>\n"
             f"В наличии: <b>{int(product.get('stock') or 0)} шт.</b>"
         )
-        await bot.send_photo(PRODUCTS_CHANNEL_CHAT_ID, photo_ref(filename), caption=caption, parse_mode="HTML")
+        channel_url = webapp_product_url(product["id"])
+        markup = InlineKeyboardMarkup(inline_keyboard=[[blue_button("🛒 Купить в лавке", url=channel_url)]]) if channel_url else None
+        await bot.send_photo(PRODUCTS_CHANNEL_CHAT_ID, photo_ref(filename), caption=caption, parse_mode="HTML", reply_markup=markup)
         return True
     except Exception as error:
         log.warning("New product channel notification failed: %s", error)
