@@ -145,6 +145,9 @@ active_bot = {}
 # Keep strong references to background broadcasts so they are never collected.
 broadcast_tasks = set()
 wallet_amount_state = {}
+# Set only from a real proxied request. This is diagnostic information: it
+# never replaces WEBAPP_URL, so an untrusted Host header cannot alter buttons.
+observed_public_origin = None
 
 
 def blue_button(label, **action):
@@ -167,6 +170,22 @@ def webapp_url(**params):
     query = dict(parse_qsl(url.query))
     query.update(params)
     return urlunsplit((url.scheme, url.netloc, url.path or "/", urlencode(query), ""))
+
+
+@web.middleware
+async def observe_public_origin(request, handler):
+    """Log the first public origin actually forwarded by the hosting proxy."""
+    global observed_public_origin
+    if observed_public_origin is None:
+        # Proxies normally retain Host and may additionally send the standard
+        # X-Forwarded headers. The first value is the original client value.
+        host = (request.headers.get("X-Forwarded-Host") or request.headers.get("Host") or "").split(",", 1)[0].strip()
+        proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",", 1)[0].strip().lower()
+        parsed = urlsplit(f"{proto}://{host}")
+        if proto == "https" and parsed.netloc and parsed.hostname not in ("localhost", "127.0.0.1", "0.0.0.0"):
+            observed_public_origin = f"https://{parsed.netloc}"
+            log.info("Observed public URL from hosting proxy: %s", observed_public_origin)
+    return await handler(request)
 
 
 def menu_keyboard():
@@ -1905,6 +1924,7 @@ async def _broadcast(bot, recipients, filename, product, markup):
 
 async def make_app():
     application = web.Application(client_max_size=64 * 1024)
+    application.middlewares.append(observe_public_origin)
     register_api(application, store, BOT_TOKEN, ADMIN_IDS, SUPPORT_USERNAME, testers=TESTER_IDS,
                  notifier=notify_deliveries, order_notifier=web_order_notice,
                  product_notifier=notify_new_product, panel_token=ADMIN_PANEL_TOKEN,
@@ -1969,10 +1989,10 @@ async def expire_crypto_reservations():
 
 async def main():
     if WEBAPP_URL:
-        log.info("Public Web App URL: %s (from %s)", WEBAPP_URL, WEBAPP_URL_SOURCE)
+        log.info("Configured Web App URL: %s (from %s)", WEBAPP_URL, WEBAPP_URL_SOURCE)
     else:
         log.warning(
-            "Public Web App URL is not configured. Set WEBAPP_URL; the hosting platform did not expose a usable public URL."
+            "Web App URL is not configured. The first public request will still be logged for hosting diagnostics."
         )
     web_only = os.environ.get("WEB_ONLY", "").lower() in ("1", "true", "yes")
     if not web_only and not BOT_TOKEN:
