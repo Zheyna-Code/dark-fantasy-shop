@@ -504,6 +504,30 @@ class Store:
             await db.execute("UPDATE crypto_invoices SET status='paid',paid_at=$1 WHERE id=$2", int(time.time()), invoice["id"])
             return result
 
+    async def expire_crypto_order_reservations(self, timeout_seconds=120):
+        """Release stock for unpaid Crypto Pay orders. This creates no buyer or channel notification."""
+        cutoff = int(time.time()) - timeout_seconds
+        expired = 0
+        async with self.transaction() as db:
+            invoices = await db.fetch(
+                "SELECT * FROM crypto_invoices WHERE purpose='order' AND status='new' AND created_at<=$1 "
+                "ORDER BY id FOR UPDATE SKIP LOCKED", cutoff,
+            )
+            for invoice in invoices:
+                order = await db.fetchrow("SELECT * FROM orders WHERE id=$1 FOR UPDATE", invoice["order_id"])
+                if order and order["status"] == "new" and order["payment"] == "crypto":
+                    try:
+                        items = json.loads(order["items"])
+                    except (ValueError, TypeError):
+                        items = []
+                    for item in items:
+                        if type(item.get("id")) is int and type(item.get("qty")) is int:
+                            await db.execute("UPDATE products SET stock=stock+$1 WHERE id=$2", item["qty"], item["id"])
+                    await db.execute("UPDATE orders SET status='cancelled' WHERE id=$1", order["id"])
+                    expired += 1
+                await db.execute("UPDATE crypto_invoices SET status='expired' WHERE id=$1", invoice["id"])
+        return expired
+
     async def save_category(self, body, item_id=None):
         name = text(body.get("name"), "Название", 120, True)
         active = flag(body.get("active", True), "Показывать")
@@ -1093,7 +1117,7 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         description = "Пополнение баланса Лавки Странника" if purpose == "topup" else f"Заказ № {order_id} в Лавке Странника"
         charged_amount = (amount * 100 + (100 - crypto_fee_percent) - 1) // (100 - crypto_fee_percent)
         request_data = {"currency_type": "fiat", "fiat": "RUB", "amount": str(charged_amount), "accepted_assets": "USDT,TON,TRX", "description": description,
-                        "payload": local["payload"], "expires_in": 3600}
+                        "payload": local["payload"], "expires_in": 120 if purpose == "order" else 3600}
         try:
             async with ClientSession(timeout=ClientTimeout(total=15)) as session:
                 async with session.post(crypto_api_base + "/createInvoice", json=request_data,

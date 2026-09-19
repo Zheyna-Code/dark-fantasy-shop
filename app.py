@@ -271,7 +271,7 @@ async def crypto_invoice(user_id, amount, purpose, order_id=None):
     description = "Пополнение баланса Лавки Странника" if purpose == "topup" else f"Заказ № {order_id} в Лавке Странника"
     charged_amount = (amount * 100 + (100 - CRYPTO_PAY_FEE_PERCENT) - 1) // (100 - CRYPTO_PAY_FEE_PERCENT)
     request_data = {"currency_type": "fiat", "fiat": "RUB", "amount": str(charged_amount), "accepted_assets": "USDT,TON,TRX",
-                    "description": description, "payload": local["payload"], "expires_in": 3600}
+                    "description": description, "payload": local["payload"], "expires_in": 120 if purpose == "order" else 3600}
     base = (CRYPTO_PAY_API_BASE or "https://pay.crypt.bot/api").rstrip("/")
     try:
         async with ClientSession(timeout=ClientTimeout(total=15)) as session:
@@ -1874,6 +1874,20 @@ async def make_app():
     return application
 
 
+async def expire_crypto_reservations():
+    """Keep crypto stock reservations bounded even across browser disconnects or restarts."""
+    while True:
+        try:
+            expired = await store.expire_crypto_order_reservations(120)
+            if expired:
+                log.info("Released %s unpaid Crypto Pay order reservation(s)", expired)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            log.warning("Crypto reservation cleanup failed: %s", error)
+        await asyncio.sleep(15)
+
+
 async def main():
     web_only = os.environ.get("WEB_ONLY", "").lower() in ("1", "true", "yes")
     if not web_only and not BOT_TOKEN:
@@ -1904,6 +1918,7 @@ async def main():
     host = os.environ.get("HOST", "0.0.0.0")
     try:
         await web.TCPSite(runner, host, port).start()
+        expiry_task = asyncio.create_task(expire_crypto_reservations())
         log.info("Shop listening at %s:%s", host, port)
         if web_only:
             await asyncio.Event().wait()
@@ -1917,6 +1932,12 @@ async def main():
                 await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
                 await dp.start_polling(bot, close_bot_session=False)
     finally:
+        if 'expiry_task' in locals():
+            expiry_task.cancel()
+            try:
+                await expiry_task
+            except asyncio.CancelledError:
+                pass
         await runner.cleanup()
         await store.close()
 
