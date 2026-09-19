@@ -530,6 +530,15 @@ class Store:
                 await db.execute("UPDATE crypto_invoices SET status='expired' WHERE id=$1", invoice["id"])
         return expired
 
+    async def pending_crypto_invoices(self, limit=100):
+        """Small polling fallback when a provider webhook is delayed or disabled."""
+        async with self.connection() as db:
+            rows = await db.fetch(
+                "SELECT payload,invoice_id FROM crypto_invoices WHERE status='new' AND invoice_id IS NOT NULL "
+                "ORDER BY id LIMIT $1", limit,
+            )
+        return [{"payload": row["payload"], "invoice_id": row["invoice_id"]} for row in rows]
+
     async def save_category(self, body, item_id=None):
         name = text(body.get("name"), "Название", 120, True)
         active = flag(body.get("active", True), "Показывать")

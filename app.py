@@ -1892,9 +1892,34 @@ async def make_app():
 
 
 async def expire_crypto_reservations():
-    """Keep crypto stock reservations bounded even across browser disconnects or restarts."""
+    """Keep reservations bounded and reconcile paid invoices when webhooks are unavailable."""
     while True:
         try:
+            if CRYPTO_PAY_TOKEN:
+                pending = await store.pending_crypto_invoices()
+                invoice_ids = [item["invoice_id"] for item in pending]
+                if invoice_ids:
+                    base = (CRYPTO_PAY_API_BASE or "https://pay.crypt.bot/api").rstrip("/")
+                    async with ClientSession(timeout=ClientTimeout(total=15)) as session:
+                        async with session.get(base + "/getInvoices", params={"invoice_ids": ",".join(invoice_ids)},
+                                               headers={"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}) as response:
+                            data = await response.json(content_type=None)
+                    result = data.get("result") if isinstance(data, dict) else None
+                    invoices = result.get("items", []) if isinstance(result, dict) else (result if isinstance(result, list) else [])
+                    known = {str(item["invoice_id"]): item["payload"] for item in pending}
+                    for invoice in invoices:
+                        if not isinstance(invoice, dict) or invoice.get("status") != "paid":
+                            continue
+                        payload = known.get(str(invoice.get("invoice_id")))
+                        if not payload:
+                            continue
+                        settled = await store.settle_crypto_invoice(payload, invoice.get("invoice_id"))
+                        if settled.get("replayed"):
+                            continue
+                        if settled.get("purpose") == "topup":
+                            await notify_balance_topup(settled["user_id"], settled["amount"], settled["balance"])
+                        elif settled.get("issued"):
+                            await notify_deliveries(settled["issued"])
             expired = await store.expire_crypto_order_reservations(120)
             if expired:
                 log.info("Released %s unpaid Crypto Pay order reservation(s)", expired)
