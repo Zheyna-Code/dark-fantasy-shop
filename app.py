@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from aiohttp import ClientSession, ClientTimeout, web
 from aiogram import BaseMiddleware, Bot, Dispatcher, F
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
     BotCommand, CallbackQuery, FSInputFile, InlineKeyboardButton,
@@ -1928,8 +1928,13 @@ async def main():
                 dp.callback_query.outer_middleware(SubscriptionMiddleware())
                 # Only /menu is listed: /admin, /add, /id and /cancel stay hidden
                 # and answer administrators alone.
-                await bot.set_my_commands([BotCommand(command="menu", description="Открыть меню лавки")])
-                await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+                # Some Telegram bot accounts reject frozen menu-management methods
+                # (FROZEN_METHOD_INVALID). The shop itself must keep polling.
+                try:
+                    await bot.set_my_commands([BotCommand(command="menu", description="Открыть меню лавки")])
+                    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+                except TelegramBadRequest as error:
+                    log.warning("Telegram menu setup skipped: %s", error)
                 await dp.start_polling(bot, close_bot_session=False)
     finally:
         if 'expiry_task' in locals():
