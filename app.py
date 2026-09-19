@@ -428,7 +428,13 @@ def product_caption(item):
         availability = f"🟢 В наличии: {stock}"
     else:
         availability = "🔴 Нет в наличии"
-    description = escape(item.get("description") or "Описание уточняется у хранителя.")
+    # Telegram captions are limited to 1,024 characters. Product descriptions
+    # may be 4,000 characters in the admin panel, so trim the preview before
+    # escaping it instead of making Telegram reject the whole edit.
+    raw_description = str(item.get("description") or "Описание уточняется у хранителя.")
+    if len(raw_description) > 600:
+        raw_description = raw_description[:599].rstrip() + "…"
+    description = escape(raw_description)
     price = f"{item['price']:,} ₽" if type(item.get("price")) is int and item["price"] > 0 else "Цена уточняется"
     reviews = int(item.get("reviews") or 0)
     rating_line = f"⭐ {item['rating']} · отзывов: {reviews}" if reviews and item.get("rating") else "Отзывов пока нет"
