@@ -28,6 +28,9 @@ PUBLIC_URL_ENV_NAMES = (
     "WEBAPP_URL", "INFRLO_PUBLIC_URL", "INFRLO_EXTERNAL_URL", "INFRLO_URL",
     "RENDER_EXTERNAL_URL", "PUBLIC_URL", "SERVICE_URL", "APP_URL",
 )
+# Current Infrlo service URL used when the host does not inject a public URL.
+# It can be replaced without touching WEBAPP_URL by setting this variable.
+INFRLO_FALLBACK_URL = os.environ.get("INFRLO_FALLBACK_URL", "https://asdasdtfnk.infrlo.com").strip().rstrip("/")
 
 
 def configured_public_url():
@@ -36,6 +39,9 @@ def configured_public_url():
         parsed = urlsplit(value)
         if parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password:
             return value, name
+    parsed = urlsplit(INFRLO_FALLBACK_URL)
+    if parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password:
+        return INFRLO_FALLBACK_URL, "INFRLO_FALLBACK_URL"
     return "", ""
 
 
@@ -48,8 +54,11 @@ if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
 REVIEWS_GROUP_CHAT_ID = os.environ.get("REVIEWS_GROUP_CHAT_ID", "").strip()
 # Channel where newly created and restocked products are announced.
 PRODUCTS_CHANNEL_CHAT_ID = os.environ.get("PRODUCTS_CHANNEL_CHAT_ID", "@Ditzzm1337").strip()
-REQUIRED_CHANNEL = "Ditzzm1337"
-REQUIRED_CHANNEL_URL = "https://t.me/Ditzzm1337"
+# The bot must be an administrator in this channel to query other members.
+# A numeric ID is preferred for private channels; public channels may use @username.
+REQUIRED_CHANNEL = os.environ.get("REQUIRED_CHANNEL", "Ditzzm1337").strip().lstrip("@")
+REQUIRED_CHANNEL_CHAT_ID = os.environ.get("REQUIRED_CHANNEL_CHAT_ID", f"@{REQUIRED_CHANNEL}").strip()
+REQUIRED_CHANNEL_URL = os.environ.get("REQUIRED_CHANNEL_URL", f"https://t.me/{REQUIRED_CHANNEL}").strip()
 PRIVACY_POLICY_URL = "https://teletype.in/@aishopditzzm/6rLg2BNAz8-"
 USER_AGREEMENT_URL = "https://teletype.in/@aishopditzzm/OniyCUsM8gt"
 WARRANTY_TERMS_URL = "https://teletype.in/@aishopditzzm/Ml2mgNp0KFk"
@@ -220,7 +229,7 @@ async def is_subscribed(user_id, refresh=False):
     if not refresh and subscription_cache.get(user_id, 0) > now:
         return True
     try:
-        member = await bot.get_chat_member(f"@{REQUIRED_CHANNEL}", user_id)
+        member = await bot.get_chat_member(REQUIRED_CHANNEL_CHAT_ID, user_id)
         subscribed = member.status in ("creator", "administrator", "member") or (
             member.status == "restricted" and bool(getattr(member, "is_member", False))
         )
@@ -229,8 +238,15 @@ async def is_subscribed(user_id, refresh=False):
         else:
             subscription_cache.pop(user_id, None)
         return subscribed
+    except TelegramBadRequest as error:
+        log.warning(
+            "Subscription check failed for %s in %s: %s. "
+            "Make the bot an administrator in the channel and set REQUIRED_CHANNEL_CHAT_ID.",
+            user_id, REQUIRED_CHANNEL_CHAT_ID, error,
+        )
+        return False
     except Exception as error:
-        log.warning("Subscription check failed for %s: %s", user_id, error)
+        log.warning("Subscription check failed for %s in %s: %s", user_id, REQUIRED_CHANNEL_CHAT_ID, error)
         return False
 
 
@@ -1060,11 +1076,23 @@ async def menu_callback(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "subscription:check")
 async def subscription_check_callback(callback: CallbackQuery):
+    # A callback query expires quickly. A membership lookup can take several
+    # seconds, so acknowledge the button before doing the Telegram API call.
+    try:
+        await callback.answer()
+    except TelegramBadRequest as error:
+        # The user may have pressed an old button. There is no valid callback
+        # query left to answer, but the update itself should not crash polling.
+        if "query is too old" not in str(error).lower() and "query id is invalid" not in str(error).lower():
+            log.warning("Could not acknowledge subscription callback: %s", error)
+
     if await is_subscribed(callback.from_user.id, refresh=True):
-        await callback.answer("Подписка подтверждена.")
         await send_menu(callback.message, callback.from_user)
     else:
-        await callback.answer("Подписка не найдена. Подпишись на канал и проверь ещё раз.", show_alert=True)
+        await callback.message.answer(
+            "Подписка не найдена. Подпишись на канал и нажми «Проверить подписку» ещё раз.",
+            reply_markup=subscription_keyboard(),
+        )
 
 
 async def catalog_keyboard():
