@@ -1048,11 +1048,12 @@ async def api_errors(request, handler):
 
 
 def register_api(app, store, bot_token, admin_ids, support_username, testers=(), notifier=None,
-                 order_notifier=None, product_notifier=None, panel_token="", crypto_token="", crypto_api_base=""):
+                 order_notifier=None, product_notifier=None, panel_token="", crypto_token="", crypto_api_base="", crypto_fee_percent=3):
     testers = set(testers)
     # Crypto Bot tokens are issued for the official Crypto Pay API. A separate
     # base is accepted only for the documented testnet endpoint.
     crypto_api_base = (crypto_api_base or "https://pay.crypt.bot/api").rstrip("/")
+    crypto_fee_percent = min(max(int(crypto_fee_percent), 0), 99)
     app.middlewares.append(api_errors)
 
     def optional_user(request):
@@ -1090,7 +1091,8 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
             raise ApiError("Криптооплата пока не настроена. Укажи CRYPTO_PAY_TOKEN на хостинге.", 503)
         local = await store.create_crypto_invoice(user_id, amount, purpose, order_id)
         description = "Пополнение баланса Лавки Странника" if purpose == "topup" else f"Заказ № {order_id} в Лавке Странника"
-        request_data = {"currency_type": "fiat", "fiat": "RUB", "amount": str(amount), "accepted_assets": "USDT,TON,TRX", "description": description,
+        charged_amount = (amount * 100 + (100 - crypto_fee_percent) - 1) // (100 - crypto_fee_percent)
+        request_data = {"currency_type": "fiat", "fiat": "RUB", "amount": str(charged_amount), "accepted_assets": "USDT,TON,TRX", "description": description,
                         "payload": local["payload"], "expires_in": 3600}
         try:
             async with ClientSession(timeout=ClientTimeout(total=15)) as session:
@@ -1102,7 +1104,8 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
             if not pay_url:
                 raise ApiError("Crypto Pay не создал счёт. Проверь токен и настройки Merchant API.", 502)
             await store.bind_crypto_invoice(local["payload"], result.get("invoice_id"))
-            return {"ok": True, "pay_url": pay_url, "invoice_id": result.get("invoice_id"), "amount": amount}
+            return {"ok": True, "pay_url": pay_url, "invoice_id": result.get("invoice_id"), "amount": charged_amount,
+                    "credit_amount": amount, "fee_percent": crypto_fee_percent}
         except ApiError:
             await store.cancel_crypto_invoice(local["payload"])
             raise

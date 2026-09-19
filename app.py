@@ -52,6 +52,9 @@ ADMIN_PANEL_TOKEN = os.environ.get("ADMIN_PANEL_TOKEN", "").strip()
 CRYPTO_PAY_TOKEN = os.environ.get("CRYPTO_PAY_TOKEN", "").strip()
 # Optional: only set this to the documented testnet URL while testing.
 CRYPTO_PAY_API_BASE = os.environ.get("CRYPTO_PAY_API_BASE", "").strip()
+# Crypto Pay deducts its service fee from the received invoice. Gross up the
+# invoice so a 3% fee is paid by the customer and the shop still receives price.
+CRYPTO_PAY_FEE_PERCENT = 3
 # Testers buy test products without payment to check automatic delivery.
 TESTER_IDS = parse_admin_ids(os.environ.get("TESTER_IDS", ""))
 logging.basicConfig(level=logging.INFO)
@@ -258,7 +261,8 @@ async def crypto_invoice(user_id, amount, purpose, order_id=None):
         raise ApiError("Криптооплата ещё не настроена.", 503)
     local = await store.create_crypto_invoice(user_id, amount, purpose, order_id)
     description = "Пополнение баланса Лавки Странника" if purpose == "topup" else f"Заказ № {order_id} в Лавке Странника"
-    request_data = {"currency_type": "fiat", "fiat": "RUB", "amount": str(amount), "accepted_assets": "USDT,TON,TRX",
+    charged_amount = (amount * 100 + (100 - CRYPTO_PAY_FEE_PERCENT) - 1) // (100 - CRYPTO_PAY_FEE_PERCENT)
+    request_data = {"currency_type": "fiat", "fiat": "RUB", "amount": str(charged_amount), "accepted_assets": "USDT,TON,TRX",
                     "description": description, "payload": local["payload"], "expires_in": 3600}
     base = (CRYPTO_PAY_API_BASE or "https://pay.crypt.bot/api").rstrip("/")
     try:
@@ -272,7 +276,7 @@ async def crypto_invoice(user_id, amount, purpose, order_id=None):
         if not pay_url:
             raise ApiError("Crypto Pay не создал счёт. Проверь токен приложения.", 502)
         await store.bind_crypto_invoice(local["payload"], result.get("invoice_id"))
-        return pay_url
+        return pay_url, charged_amount
     except ApiError:
         await store.cancel_crypto_invoice(local["payload"])
         raise
@@ -1037,12 +1041,12 @@ async def wallet_payment_callback(callback: CallbackQuery):
     if method == "crypto":
         try:
             await store.profile(callback.from_user.model_dump(), callback.from_user.id in ADMIN_IDS)
-            url = await crypto_invoice(callback.from_user.id, amount, "topup")
+            url, charged_amount = await crypto_invoice(callback.from_user.id, amount, "topup")
         except ApiError as error:
             await callback.message.answer(error.message, parse_mode="HTML")
             return
         await replace_message(callback.message,
-            f"<b>💠 Криптопополнение · {amount} ₽</b>\n\nОткрой счёт и оплати его в Crypto Bot. Баланс зачислится автоматически после подтверждения оплаты.",
+            f"<b>💠 Криптопополнение · {amount} ₽</b>\n\nК оплате: <b>{charged_amount} ₽</b> (комиссия Crypto Pay 3% включена). Баланс зачислится на <b>{amount} ₽</b> после подтверждения оплаты.",
             InlineKeyboardMarkup(inline_keyboard=[[blue_button("Оплатить в Crypto Pay", url=url)], [blue_button("⬅️ К кошельку", callback_data="menu:wallet")]]))
         return
     await replace_message(
@@ -1277,14 +1281,14 @@ async def payment_callback(callback: CallbackQuery):
         return
     if payment == "crypto":
         try:
-            url = await crypto_invoice(callback.from_user.id, result["total"], "order", result["order_id"])
+            url, charged_amount = await crypto_invoice(callback.from_user.id, result["total"], "order", result["order_id"])
         except ApiError as error:
             await store.change_order(result["order_id"], "cancelled")
             await callback.answer(error.message, show_alert=True)
             return
         await callback.answer("Счёт Crypto Pay создан")
         await replace_message(callback.message,
-            f"<b>💠 Счёт № {result['order_id']}</b>\n\nСумма: <b>{result['total']:,} ₽</b>. После оплаты товар будет выдан автоматически.",
+            f"<b>💠 Счёт № {result['order_id']}</b>\n\nТовар: <b>{result['total']:,} ₽</b>\nК оплате: <b>{charged_amount:,} ₽</b> (комиссия Crypto Pay 3% включена). После оплаты товар будет выдан автоматически.",
             InlineKeyboardMarkup(inline_keyboard=[[blue_button("Оплатить в Crypto Pay", url=url)], [blue_button("В меню", callback_data="menu:home")]]))
         return
     await callback.answer("Заказ оплачен с баланса")
@@ -1838,7 +1842,8 @@ async def make_app():
     register_api(application, store, BOT_TOKEN, ADMIN_IDS, SUPPORT_USERNAME, testers=TESTER_IDS,
                  notifier=notify_deliveries, order_notifier=web_order_notice,
                  product_notifier=notify_new_product, panel_token=ADMIN_PANEL_TOKEN,
-                 crypto_token=CRYPTO_PAY_TOKEN, crypto_api_base=CRYPTO_PAY_API_BASE)
+                 crypto_token=CRYPTO_PAY_TOKEN, crypto_api_base=CRYPTO_PAY_API_BASE,
+                 crypto_fee_percent=CRYPTO_PAY_FEE_PERCENT)
 
     async def index(request):
         return web.FileResponse(BASE_DIR / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})
