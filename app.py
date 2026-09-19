@@ -1757,6 +1757,23 @@ async def notify_deliveries(events):
                 await ask_review(bot, event["user_id"], event["order_id"], reviewable)
 
 
+async def notify_balance_topup(user_id, amount, balance):
+    """A standalone receipt for every confirmed wallet credit, without exposing its payment method."""
+    bot = active_bot.get("bot")
+    if not bot:
+        return
+    try:
+        await bot.send_message(
+            user_id,
+            f"<b>💰 Пополнение баланса</b>\n\nЗачислено: <b>{int(amount):,} ₽</b>\nБаланс: <b>{int(balance):,} ₽</b>",
+            parse_mode="HTML", reply_markup=back_keyboard(),
+        )
+    except TelegramForbiddenError:
+        await store.mark_blocked(user_id)
+    except Exception as error:
+        log.warning("Balance top-up notice to user %s failed: %s", user_id, error)
+
+
 async def notify_restock(product, delivered=0):
     """Announce a restock in the channel and notify travelers waiting for it."""
     bot = active_bot.get("bot")
@@ -1855,7 +1872,7 @@ async def make_app():
                  notifier=notify_deliveries, order_notifier=web_order_notice,
                  product_notifier=notify_new_product, panel_token=ADMIN_PANEL_TOKEN,
                  crypto_token=CRYPTO_PAY_TOKEN, crypto_api_base=CRYPTO_PAY_API_BASE,
-                 crypto_fee_percent=CRYPTO_PAY_FEE_PERCENT)
+                 crypto_fee_percent=CRYPTO_PAY_FEE_PERCENT, balance_notifier=notify_balance_topup)
 
     async def index(request):
         return web.FileResponse(BASE_DIR / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})

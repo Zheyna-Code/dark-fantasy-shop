@@ -1073,7 +1073,8 @@ async def api_errors(request, handler):
 
 
 def register_api(app, store, bot_token, admin_ids, support_username, testers=(), notifier=None,
-                 order_notifier=None, product_notifier=None, panel_token="", crypto_token="", crypto_api_base="", crypto_fee_percent=3):
+                 order_notifier=None, product_notifier=None, panel_token="", crypto_token="", crypto_api_base="", crypto_fee_percent=3,
+                 balance_notifier=None):
     testers = set(testers)
     # Crypto Bot tokens are issued for the official Crypto Pay API. A separate
     # base is accepted only for the documented testnet endpoint.
@@ -1109,6 +1110,11 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
                 await notifier(result["issued"])
             except Exception as error:  # The order is saved; a notice failure must not break the request.
                 log.warning("Delivery notice failed: %s", error)
+        if balance_notifier and result.get("purpose") == "topup":
+            try:
+                await balance_notifier(result["user_id"], result["amount"], result["balance"])
+            except Exception as error:
+                log.warning("Balance top-up notice failed: %s", error)
         return result
 
     async def issue_crypto_invoice(user_id, amount, purpose, order_id=None):
@@ -1325,6 +1331,11 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         user_id = integer(payload.get("user_id"), "ID покупателя", 2**63 - 1, 1)
         amount = integer(payload.get("amount"), "Сумма пополнения", 10**6, 1)
         balance = await store.add_balance(user_id, amount)
+        if balance_notifier:
+            try:
+                await balance_notifier(user_id, amount, balance)
+            except Exception as error:
+                log.warning("Manual balance top-up notice failed: %s", error)
         return web.json_response({"ok": True, "user_id": user_id, "balance": balance})
 
     async def admin_reviews(request):
