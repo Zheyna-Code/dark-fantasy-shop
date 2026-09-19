@@ -973,7 +973,8 @@ class Store:
         for item, rows in plan:
             await db.execute("UPDATE deliveries SET status='issued', order_id=$1 WHERE id = ANY($2::bigint[])",
                              order["id"], [row["id"] for row in rows])
-            delivered.append({"name": item.get("name", "Товар"), "payloads": [row["payload"] for row in rows]})
+            delivered.append({"id": item.get("id"), "name": item.get("name", "Товар"),
+                              "payloads": [row["payload"] for row in rows]})
         return [{"user_id": order["user_id"], "order_id": order["id"], "kind": order["kind"], "items": delivered}]
 
     async def _fulfill_preorders(self, db, product_id):
