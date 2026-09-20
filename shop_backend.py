@@ -163,6 +163,13 @@ CREATE TABLE IF NOT EXISTS crypto_invoices (
     order_id BIGINT, status TEXT NOT NULL DEFAULT 'new', created_at BIGINT NOT NULL,
     paid_at BIGINT
 );
+CREATE TABLE IF NOT EXISTS bot_outbox (
+    id BIGSERIAL PRIMARY KEY, kind TEXT NOT NULL, user_id BIGINT NOT NULL,
+    payload TEXT NOT NULL, dedupe_key TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'queued', attempts INTEGER NOT NULL DEFAULT 0,
+    created_at BIGINT NOT NULL, locked_until BIGINT NOT NULL DEFAULT 0,
+    sent_at BIGINT, last_error TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS orders_by_user ON orders(user_id, status);
 CREATE INDEX IF NOT EXISTS orders_by_kind ON orders(kind, status, id);
 CREATE INDEX IF NOT EXISTS deliveries_queue ON deliveries(product_id, status, id);
@@ -170,6 +177,7 @@ CREATE INDEX IF NOT EXISTS deliveries_by_order ON deliveries(order_id);
 CREATE INDEX IF NOT EXISTS reviews_by_product ON reviews(product_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS order_retry ON orders(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS crypto_invoices_by_order ON crypto_invoices(order_id);
+CREATE INDEX IF NOT EXISTS bot_outbox_pending ON bot_outbox(status, locked_until, id);
 """
 
 MIGRATIONS = {
@@ -493,6 +501,9 @@ class Store:
                 if balance is None:
                     raise ApiError("Покупатель не найден.", 404)
                 result = {"ok": True, "purpose": "topup", "user_id": invoice["user_id"], "amount": invoice["amount"], "balance": int(balance)}
+                await self._enqueue_bot_notice(
+                    db, "topup", invoice["user_id"], result, f"crypto-topup:{invoice['id']}",
+                )
             else:
                 order = await db.fetchrow("SELECT * FROM orders WHERE id=$1 AND user_id=$2 FOR UPDATE", invoice["order_id"], invoice["user_id"])
                 if not order:
@@ -503,8 +514,59 @@ class Store:
                 status = "done" if issued else "paid"
                 await db.execute("UPDATE orders SET status=$1,payment='crypto' WHERE id=$2", status, order["id"])
                 result = {"ok": True, "purpose": "order", "order_id": order["id"], "user_id": order["user_id"], "total": order["total"], "status": status, "issued": issued}
+                if issued:
+                    await self._enqueue_bot_notice(
+                        db, "delivery", order["user_id"], issued[0], f"crypto-delivery:{order['id']}",
+                    )
             await db.execute("UPDATE crypto_invoices SET status='paid',paid_at=$1 WHERE id=$2", int(time.time()), invoice["id"])
             return result
+
+    async def _enqueue_bot_notice(self, db, kind, user_id, payload, dedupe_key):
+        """Persist a Telegram notification before committing a crypto payment.
+
+        The HTTPS payment endpoint and the long-running Telegram bot may live on
+        different hosts.  An outbox makes delivery independent of which host got
+        the webhook, and the unique key keeps retries from sending goods twice.
+        """
+        await db.execute(
+            "INSERT INTO bot_outbox(kind,user_id,payload,dedupe_key,created_at) VALUES($1,$2,$3,$4,$5) "
+            "ON CONFLICT (dedupe_key) DO NOTHING",
+            kind, user_id, json.dumps(payload, ensure_ascii=False), dedupe_key, int(time.time()),
+        )
+
+    async def claim_bot_notices(self, limit=20, lock_seconds=120):
+        """Claim queued notices for the one host that has a live Telegram bot."""
+        limit = min(max(int(limit), 1), 100)
+        now = int(time.time())
+        async with self.transaction() as db:
+            rows = await db.fetch(
+                "SELECT id,kind,user_id,payload,attempts FROM bot_outbox "
+                "WHERE status='queued' OR (status='processing' AND locked_until<=$1) "
+                "ORDER BY id LIMIT $2 FOR UPDATE SKIP LOCKED", now, limit,
+            )
+            if not rows:
+                return []
+            ids = [row["id"] for row in rows]
+            await db.execute(
+                "UPDATE bot_outbox SET status='processing',attempts=attempts+1,locked_until=$1 WHERE id=ANY($2::bigint[])",
+                now + lock_seconds, ids,
+            )
+        return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
+
+    async def complete_bot_notice(self, notice_id):
+        async with self.connection() as db:
+            await db.execute(
+                "UPDATE bot_outbox SET status='sent',sent_at=$1,locked_until=0,last_error='' "
+                "WHERE id=$2 AND status='processing'", int(time.time()), notice_id,
+            )
+
+    async def retry_bot_notice(self, notice_id, attempts, error):
+        delay = min(300, max(10, int(attempts) * 10))
+        async with self.connection() as db:
+            await db.execute(
+                "UPDATE bot_outbox SET status='queued',locked_until=$1,last_error=$2 WHERE id=$3 AND status='processing'",
+                int(time.time()) + delay, str(error)[:500], notice_id,
+            )
 
     async def expire_crypto_order_reservations(self, timeout_seconds=120):
         """Release stock for unpaid Crypto Pay orders. This creates no buyer or channel notification."""
@@ -1326,7 +1388,8 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         if event.get("update_type") != "invoice_paid" or not isinstance(payload, str):
             return web.json_response({"ok": True})
         result = await store.settle_crypto_invoice(payload, invoice_id)
-        await deliver(result)
+        # Crypto notices are persisted in bot_outbox by settle_crypto_invoice.
+        # The bot host, rather than this HTTPS host, sends them to Telegram.
         return web.json_response({"ok": True})
 
     async def admin_users(request):

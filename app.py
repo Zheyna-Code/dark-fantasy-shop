@@ -16,10 +16,15 @@ from aiogram.types import (
     BotCommand, CallbackQuery, FSInputFile, InlineKeyboardButton,
     InlineKeyboardMarkup, InputMediaPhoto, MenuButtonCommands, Message, WebAppInfo,
 )
+from dotenv import load_dotenv
 
 from shop_backend import ApiError, Store, register_api
 
 BASE_DIR = Path(__file__).resolve().parent
+# Some lightweight hosts do not provide an environment-variable panel.  Loading
+# this ignored local file keeps credentials out of source code and Git while
+# preserving real host-provided environment variables as the higher priority.
+load_dotenv(BASE_DIR / ".env", override=False)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 # An explicitly configured URL wins. Some hosts expose their generated public
 # address at runtime, so recognize those safe, non-secret variables as a
@@ -28,9 +33,10 @@ PUBLIC_URL_ENV_NAMES = (
     "WEBAPP_URL", "INFRLO_PUBLIC_URL", "INFRLO_EXTERNAL_URL", "INFRLO_URL",
     "RENDER_EXTERNAL_URL", "PUBLIC_URL", "SERVICE_URL", "APP_URL",
 )
-# Current Infrlo service URL used when the host does not inject a public URL.
-# It can be replaced without touching WEBAPP_URL by setting this variable.
-INFRLO_FALLBACK_URL = os.environ.get("INFRLO_FALLBACK_URL", "https://asdasdtfnk.infrlo.com").strip().rstrip("/")
+# Never publish a previous host's address by default.  A public Web App URL must
+# be supplied explicitly by this host through WEBAPP_URL (or another listed
+# runtime variable).
+INFRLO_FALLBACK_URL = os.environ.get("INFRLO_FALLBACK_URL", "").strip().rstrip("/")
 
 
 def configured_public_url():
@@ -1751,6 +1757,57 @@ async def notify_deliveries(events):
                 await ask_review(bot, event["user_id"], event["order_id"], reviewable)
 
 
+async def process_bot_outbox():
+    """Send payment notices queued by the HTTPS service through this live bot.
+
+    Render may receive Crypto Pay webhooks while WEB_ONLY is enabled.  The
+    durable PostgreSQL outbox lets this always-on bot pick them up safely.
+    """
+    while True:
+        try:
+            bot = active_bot.get("bot")
+            if not bot:
+                await asyncio.sleep(5)
+                continue
+            for notice in await store.claim_bot_notices():
+                try:
+                    payload = notice["payload"]
+                    if notice["kind"] == "delivery":
+                        event = payload
+                        if event.get("kind") == "test":
+                            head = f"🧪 Тестовая покупка № {event.get('order_id')} — автовыдача сработала"
+                        elif event.get("kind") == "preorder":
+                            head = f"📦 Предзаказ № {event.get('order_id')} выполнен — товар у тебя"
+                        else:
+                            head = f"📦 Заказ № {event.get('order_id')} оплачен — товар выдан"
+                        await bot.send_message(event["user_id"], issued_message(event, head), parse_mode="HTML")
+                        reviewable = [entry for entry in event.get("items", []) if entry.get("id")]
+                        if reviewable:
+                            await ask_review(bot, event["user_id"], event["order_id"], reviewable)
+                    elif notice["kind"] == "topup":
+                        await bot.send_message(
+                            notice["user_id"],
+                            f"<b>💰 Пополнение баланса</b>\n\nЗачислено: <b>{int(payload['amount']):,} ₽</b>\n"
+                            f"Баланс: <b>{int(payload['balance']):,} ₽</b>",
+                            parse_mode="HTML", reply_markup=back_keyboard(),
+                        )
+                    else:
+                        raise ValueError(f"Unknown bot outbox kind: {notice['kind']}")
+                except TelegramForbiddenError:
+                    await store.mark_blocked(notice["user_id"])
+                    await store.complete_bot_notice(notice["id"])
+                except Exception as error:
+                    log.warning("Queued Telegram notice %s failed: %s", notice["id"], error)
+                    await store.retry_bot_notice(notice["id"], notice["attempts"], error)
+                else:
+                    await store.complete_bot_notice(notice["id"])
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            log.warning("Bot outbox worker failed: %s", error)
+        await asyncio.sleep(3)
+
+
 async def notify_balance_topup(user_id, amount, balance):
     """A standalone receipt for every confirmed wallet credit, without exposing its payment method."""
     bot = active_bot.get("bot")
@@ -1898,7 +1955,13 @@ async def expire_crypto_reservations():
                     async with ClientSession(timeout=ClientTimeout(total=15)) as session:
                         async with session.get(base + "/getInvoices", params={"invoice_ids": ",".join(invoice_ids)},
                                                headers={"Crypto-Pay-API-Token": CRYPTO_PAY_TOKEN}) as response:
-                            data = await response.json(content_type=None)
+                            raw = await response.text()
+                            try:
+                                data = json.loads(raw)
+                            except ValueError:
+                                raise RuntimeError(
+                                    f"Crypto Pay getInvoices returned HTTP {response.status}, not JSON: {raw[:160]!r}"
+                                )
                     result = data.get("result") if isinstance(data, dict) else None
                     invoices = result.get("items", []) if isinstance(result, dict) else (result if isinstance(result, list) else [])
                     known = {str(item["invoice_id"]): item["payload"] for item in pending}
@@ -1908,13 +1971,9 @@ async def expire_crypto_reservations():
                         payload = known.get(str(invoice.get("invoice_id")))
                         if not payload:
                             continue
-                        settled = await store.settle_crypto_invoice(payload, invoice.get("invoice_id"))
-                        if settled.get("replayed"):
-                            continue
-                        if settled.get("purpose") == "topup":
-                            await notify_balance_topup(settled["user_id"], settled["amount"], settled["balance"])
-                        elif settled.get("issued"):
-                            await notify_deliveries(settled["issued"])
+                        # settle_crypto_invoice writes a durable bot_outbox entry.
+                        # Only the always-on bot host sends it to Telegram.
+                        await store.settle_crypto_invoice(payload, invoice.get("invoice_id"))
             expired = await store.expire_crypto_order_reservations(120)
             if expired:
                 log.info("Released %s unpaid Crypto Pay order reservation(s)", expired)
@@ -1961,13 +2020,17 @@ async def main():
     host = os.environ.get("HOST", "0.0.0.0")
     try:
         await web.TCPSite(runner, host, port).start()
-        expiry_task = asyncio.create_task(expire_crypto_reservations())
+        # WEB_ONLY runs on the sleeping HTTPS frontend.  The always-on bot host
+        # owns reconciliation, stock expiry and the Telegram outbox instead.
+        if not web_only:
+            expiry_task = asyncio.create_task(expire_crypto_reservations())
         log.info("Shop listening at %s:%s", host, port)
         if web_only:
             await asyncio.Event().wait()
         else:
             async with Bot(BOT_TOKEN) as bot:
                 active_bot["bot"] = bot
+                outbox_task = asyncio.create_task(process_bot_outbox())
                 # Only /menu is listed: /admin, /add, /id and /cancel stay hidden
                 # and answer administrators alone.
                 # Some Telegram bot accounts reject frozen menu-management methods
@@ -1979,6 +2042,12 @@ async def main():
                     log.warning("Telegram menu setup skipped: %s", error)
                 await dp.start_polling(bot, close_bot_session=False)
     finally:
+        if 'outbox_task' in locals():
+            outbox_task.cancel()
+            try:
+                await outbox_task
+            except asyncio.CancelledError:
+                pass
         if 'expiry_task' in locals():
             expiry_task.cancel()
             try:
