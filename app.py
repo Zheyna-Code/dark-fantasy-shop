@@ -1,5 +1,6 @@
 """Лавка Странника: Telegram photo menu, mini app and authenticated admin API."""
 import asyncio
+import json
 import logging
 import os
 import re
