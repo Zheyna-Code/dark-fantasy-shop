@@ -534,6 +534,28 @@ class Store:
             kind, user_id, json.dumps(payload, ensure_ascii=False), dedupe_key, int(time.time()),
         )
 
+    async def queue_delivery_events(self, events):
+        """Queue already-issued goods for the separate always-on bot service."""
+        if not events:
+            return
+        async with self.transaction() as db:
+            for event in events:
+                if not isinstance(event, dict) or not event.get("user_id") or not event.get("order_id"):
+                    continue
+                await self._enqueue_bot_notice(
+                    db, "delivery", event["user_id"], event,
+                    f"web-delivery:{event['order_id']}",
+                )
+
+    async def queue_balance_notice(self, user_id, amount, balance):
+        """Queue a manual balance receipt when the web host has no Telegram bot."""
+        payload = {"amount": int(amount), "balance": int(balance)}
+        async with self.transaction() as db:
+            await self._enqueue_bot_notice(
+                db, "topup", user_id, payload,
+                f"web-topup:{user_id}:{secrets.token_urlsafe(12)}",
+            )
+
     async def claim_bot_notices(self, limit=20, lock_seconds=120):
         """Claim queued notices for the one host that has a live Telegram bot."""
         limit = min(max(int(limit), 1), 100)
@@ -1145,7 +1167,7 @@ async def api_errors(request, handler):
 
 def register_api(app, store, bot_token, admin_ids, support_username, testers=(), notifier=None,
                  order_notifier=None, product_notifier=None, panel_token="", crypto_token="", crypto_api_base="", crypto_fee_percent=3,
-                 balance_notifier=None):
+                 balance_notifier=None, required_channel_chat_id="", required_channel_url="", defer_bot_notices=False):
     testers = set(testers)
     # Crypto Bot tokens are issued for the official Crypto Pay API. A separate
     # base is accepted only for the documented testnet endpoint.
@@ -1163,6 +1185,48 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
             return False
         return secrets.compare_digest(request.headers.get("X-Admin-Token", ""), panel_token)
 
+    async def required_channel_member(user_id):
+        """Check Telegram membership for Mini App calls without exposing the bot token."""
+        if not required_channel_chat_id or user_id in admin_ids:
+            return True
+        if not bot_token:
+            log.warning("Required-channel check is enabled but BOT_TOKEN is missing")
+            return False
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=10)) as session:
+                async with session.get(
+                    f"https://api.telegram.org/bot{bot_token}/getChatMember",
+                    params={"chat_id": required_channel_chat_id, "user_id": user_id},
+                ) as response:
+                    payload = await response.json(content_type=None)
+            member = payload.get("result") if isinstance(payload, dict) else None
+            status = str(member.get("status", "")) if isinstance(member, dict) else ""
+            return status in {"creator", "owner", "administrator", "member"} or bool(member and member.get("is_member"))
+        except Exception as error:
+            log.warning("Required-channel API membership check failed for %s: %s", user_id, error)
+            return False
+
+    @web.middleware
+    async def required_channel_gate(request, handler):
+        # Webhooks must always reach the payment endpoint. A normal browser can
+        # still view public data, while Mini App calls (which carry initData)
+        # are blocked until the Telegram subscription exists.
+        if (not required_channel_chat_id or request.path == "/api/payments/crypto/webhook" or
+                panel_authorized(request)):
+            return await handler(request)
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("tma "):
+            return await handler(request)
+        user = verify_init_data(header[4:], bot_token)
+        if user and not await required_channel_member(user["id"]):
+            message = "Подпишись на обязательный канал и открой лавку заново."
+            if required_channel_url:
+                message += " Канал: " + required_channel_url
+            raise ApiError(message, 403)
+        return await handler(request)
+
+    app.middlewares.append(required_channel_gate)
+
     def authenticate(request, admin=False):
         if admin and panel_authorized(request):
             # The panel does not act as a buyer: a synthetic identity is enough for admin routes.
@@ -1176,12 +1240,16 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
 
     async def deliver(result):
         """Once the issue is committed, send the goods lines to buyers through the bot."""
-        if notifier and result.get("issued"):
+        if defer_bot_notices and result.get("issued"):
+            await store.queue_delivery_events(result["issued"])
+        elif notifier and result.get("issued"):
             try:
                 await notifier(result["issued"])
             except Exception as error:  # The order is saved; a notice failure must not break the request.
                 log.warning("Delivery notice failed: %s", error)
-        if balance_notifier and result.get("purpose") == "topup":
+        if defer_bot_notices and result.get("purpose") == "topup":
+            await store.queue_balance_notice(result["user_id"], result["amount"], result["balance"])
+        elif balance_notifier and result.get("purpose") == "topup":
             try:
                 await balance_notifier(result["user_id"], result["amount"], result["balance"])
             except Exception as error:
@@ -1403,7 +1471,9 @@ def register_api(app, store, bot_token, admin_ids, support_username, testers=(),
         user_id = integer(payload.get("user_id"), "ID покупателя", 2**63 - 1, 1)
         amount = integer(payload.get("amount"), "Сумма пополнения", 10**6, 1)
         balance = await store.add_balance(user_id, amount)
-        if balance_notifier:
+        if defer_bot_notices:
+            await store.queue_balance_notice(user_id, amount, balance)
+        elif balance_notifier:
             try:
                 await balance_notifier(user_id, amount, balance)
             except Exception as error:

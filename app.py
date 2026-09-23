@@ -10,7 +10,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from aiohttp import ClientSession, ClientTimeout, web
-from aiogram import Bot, Dispatcher, F
+from aiogram import BaseMiddleware, Bot, Dispatcher, F
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
@@ -61,6 +61,11 @@ if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", SUPPORT_USERNAME):
 REVIEWS_GROUP_CHAT_ID = os.environ.get("REVIEWS_GROUP_CHAT_ID", "").strip()
 # Channel where newly created and restocked products are announced.
 PRODUCTS_CHANNEL_CHAT_ID = os.environ.get("PRODUCTS_CHANNEL_CHAT_ID", "@Ditzzm1337").strip()
+# When set, a traveler must be a member of this channel before using the bot or
+# Telegram Mini App.  The bot must be an administrator in the channel so that
+# getChatMember can reliably check memberships.
+REQUIRED_CHANNEL_CHAT_ID = os.environ.get("REQUIRED_CHANNEL_CHAT_ID", "").strip() or "@Ditzzm1337"
+REQUIRED_CHANNEL_URL = os.environ.get("REQUIRED_CHANNEL_URL", "").strip() or "https://t.me/Ditzzm1337"
 PRIVACY_POLICY_URL = "https://teletype.in/@aishopditzzm/6rLg2BNAz8-"
 USER_AGREEMENT_URL = "https://teletype.in/@aishopditzzm/OniyCUsM8gt"
 WARRANTY_TERMS_URL = "https://teletype.in/@aishopditzzm/Ml2mgNp0KFk"
@@ -154,6 +159,58 @@ wallet_amount_state = {}
 # Set only from a real proxied request. This is diagnostic information: it
 # never replaces WEBAPP_URL, so an untrusted Host header cannot alter buttons.
 observed_public_origin = None
+
+
+def subscription_keyboard():
+    rows = []
+    if REQUIRED_CHANNEL_URL:
+        rows.append([blue_button("📢 Подписаться на канал", url=REQUIRED_CHANNEL_URL)])
+    rows.append([blue_button("✅ Проверить подписку", callback_data="subscription:check")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def has_required_subscription(bot, user_id):
+    """Return true only for active channel members; errors fail closed."""
+    if not REQUIRED_CHANNEL_CHAT_ID or user_id in ADMIN_IDS:
+        return True
+    try:
+        member = await bot.get_chat_member(REQUIRED_CHANNEL_CHAT_ID, user_id)
+    except Exception as error:
+        log.warning("Required-channel membership check failed for %s: %s", user_id, error)
+        return False
+    return str(member.status) in {"creator", "owner", "administrator", "member"} or bool(getattr(member, "is_member", False))
+
+
+async def subscription_required(event):
+    text = (
+        "<b>Чтобы пользоваться Лавкой, подпишись на наш канал.</b>\n\n"
+        "После подписки нажми «Проверить подписку»."
+    )
+    markup = subscription_keyboard()
+    if isinstance(event, CallbackQuery):
+        try:
+            await event.answer("Сначала подпишись на канал.", show_alert=True)
+        except TelegramBadRequest:
+            pass
+        await event.message.answer(text, parse_mode="HTML", reply_markup=markup)
+    elif isinstance(event, Message):
+        await event.answer(text, parse_mode="HTML", reply_markup=markup)
+
+
+class RequiredSubscriptionMiddleware(BaseMiddleware):
+    """Stops every private bot handler before it can expose shop actions."""
+    async def __call__(self, handler, event, data):
+        if not REQUIRED_CHANNEL_CHAT_ID:
+            return await handler(event, data)
+        user = getattr(event, "from_user", None)
+        bot = data.get("bot")
+        if not user or not bot or await has_required_subscription(bot, user.id):
+            return await handler(event, data)
+        await subscription_required(event)
+        return None
+
+
+dp.update.outer_middleware(RequiredSubscriptionMiddleware())
 
 
 def blue_button(label, **action):
@@ -1925,7 +1982,9 @@ async def make_app():
                  notifier=notify_deliveries, order_notifier=web_order_notice,
                  product_notifier=notify_new_product, panel_token=ADMIN_PANEL_TOKEN,
                  crypto_token=CRYPTO_PAY_TOKEN, crypto_api_base=CRYPTO_PAY_API_BASE,
-                 crypto_fee_percent=CRYPTO_PAY_FEE_PERCENT, balance_notifier=notify_balance_topup)
+                 crypto_fee_percent=CRYPTO_PAY_FEE_PERCENT, balance_notifier=notify_balance_topup,
+                 required_channel_chat_id=REQUIRED_CHANNEL_CHAT_ID, required_channel_url=REQUIRED_CHANNEL_URL,
+                 defer_bot_notices=os.environ.get("SERVICE_ROLE", "").strip().lower() in {"render", "web"})
 
     async def index(request):
         return web.FileResponse(BASE_DIR / "webapp" / "index.html", headers={"Cache-Control": "no-cache"})
@@ -1985,7 +2044,77 @@ async def expire_crypto_reservations():
         await asyncio.sleep(15)
 
 
-async def main():
+async def connect_store():
+    """Connect and initialize the shared database used by both services."""
+    # Retry the database connection: managed Postgres (Neon/Supabase) may need
+    # a few seconds to wake up, and crashing here surfaces as 502 Bad Gateway.
+    for attempt in range(1, 6):
+        try:
+            await store.connect()
+            break
+        except Exception:
+            if attempt == 5:
+                raise
+            delay = min(attempt * 2, 10)
+            log.exception("Database connect failed (attempt %s/5), retrying in %ss", attempt, delay)
+            await asyncio.sleep(delay)
+    await store.init_db()
+
+
+async def run_web_service():
+    """Run only the public Mini App, admin panel, API and payment webhook."""
+    if WEBAPP_URL:
+        log.info("Configured Web App URL: %s (from %s)", WEBAPP_URL, WEBAPP_URL_SOURCE)
+    else:
+        log.warning("Web App URL is not configured.")
+    await connect_store()
+    runner = web.AppRunner(await make_app())
+    await runner.setup()
+    port = int(os.environ.get("PORT", "8080"))
+    host = os.environ.get("HOST", "0.0.0.0")
+    try:
+        await web.TCPSite(runner, host, port).start()
+        log.info("Web service listening at %s:%s", host, port)
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
+        await store.close()
+
+
+async def run_bot_service():
+    """Run only Telegram polling, the payment fallback and the delivery outbox."""
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN is required by the always-on bot service")
+    await connect_store()
+    expiry_task = asyncio.create_task(expire_crypto_reservations())
+    try:
+        async with Bot(BOT_TOKEN) as bot:
+            active_bot["bot"] = bot
+            outbox_task = asyncio.create_task(process_bot_outbox())
+            try:
+                await bot.set_my_commands([BotCommand(command="menu", description="Открыть меню лавки")])
+                await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+            except TelegramBadRequest as error:
+                log.warning("Telegram menu setup skipped: %s", error)
+            await dp.start_polling(bot, close_bot_session=False)
+    finally:
+        active_bot.pop("bot", None)
+        if 'outbox_task' in locals():
+            outbox_task.cancel()
+            try:
+                await outbox_task
+            except asyncio.CancelledError:
+                pass
+        expiry_task.cancel()
+        try:
+            await expiry_task
+        except asyncio.CancelledError:
+            pass
+        await store.close()
+
+
+async def run_legacy_combined_service():
+    """Backward-compatible single-host mode for existing deployments."""
     if WEBAPP_URL:
         log.info("Configured Web App URL: %s (from %s)", WEBAPP_URL, WEBAPP_URL_SOURCE)
     else:
@@ -2000,19 +2129,7 @@ async def main():
         web_only = True
         log.warning("BOT_TOKEN not set — starting in WEB_ONLY catalog mode. "
                     "Set BOT_TOKEN on the hosting service to enable the bot.")
-    # Retry the database connection: managed Postgres (Neon/Supabase) may need
-    # a few seconds to wake up, and crashing here surfaces as 502 Bad Gateway.
-    for attempt in range(1, 6):
-        try:
-            await store.connect()
-            break
-        except Exception:
-            if attempt == 5:
-                raise
-            delay = min(attempt * 2, 10)
-            log.exception("Database connect failed (attempt %s/5), retrying in %ss", attempt, delay)
-            await asyncio.sleep(delay)
-    await store.init_db()
+    await connect_store()
     runner = web.AppRunner(await make_app())
     await runner.setup()
     port = int(os.environ.get("PORT", "8080"))
@@ -2057,6 +2174,22 @@ async def main():
                 pass
         await runner.cleanup()
         await store.close()
+
+
+async def main():
+    """Run this repository as the Render web service by default."""
+    role = os.environ.get("SERVICE_ROLE", "").strip().lower()
+    if role in {"", "render", "web"}:
+        await run_web_service()
+        return
+    if role in {"silly", "bot"}:
+        await run_bot_service()
+        return
+    if role == "combined":
+        await run_legacy_combined_service()
+        return
+    if role:
+        raise RuntimeError("SERVICE_ROLE must be 'render'/'web', 'silly'/'bot', or 'combined'")
 
 
 if __name__ == "__main__":

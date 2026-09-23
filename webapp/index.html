@@ -716,7 +716,9 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
     catalog.setAttribute("aria-busy", "true");
     catalogRequest = (async () => {
       try {
-        const data = await api("/api/catalog");
+        // Send Telegram initData when available: the server then also applies
+        // the required-channel rule before exposing the shop to this traveler.
+        const data = await api("/api/catalog", { auth: Boolean(initData()) });
         if (!Array.isArray(data.categories) || !Array.isArray(data.products)) throw new Error("Неверный формат каталога. Повтори загрузку.");
         const oldId = availableProducts()[activeIndex]?.id;
         categories = data.categories.filter(category => category && typeof category.slug === "string" && category.active !== false && category.active !== 0);
