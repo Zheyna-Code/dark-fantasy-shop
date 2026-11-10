@@ -12,6 +12,8 @@ outputs/
 .workbuddy-ai/
 .playwright-cli/
 _check.js
+.hoplite/artifacts/
+.hoplite/runtime/
 
 # Локальный инструментарий браузерных проверок (вендорится, не часть проекта)
 .workbuddy-ai/

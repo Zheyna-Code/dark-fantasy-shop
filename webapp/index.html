@@ -424,7 +424,7 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
   <p id="order-explanation">После подтверждения сумма будет списана с твоего баланса.</p>
   <div class="form-actions" id="payment-methods" hidden><button class="action primary" type="button" data-payment="balance">С баланса</button><button class="action" type="button" data-payment="crypto">Crypto Pay</button></div>
   <p id="order-feedback" class="feedback" role="status" aria-live="polite"></p>
-  <div class="form-actions"><button class="action primary" id="confirm-order" type="button">Оплатить заказ</button><button class="action" id="cancel-order" type="button">Отмена</button></div>
+  <div class="form-actions"><a class="action primary" id="order-payment" target="_blank" rel="noopener noreferrer" hidden>Перейти к оплате</a><button class="action primary" id="confirm-order" type="button">Оплатить заказ</button><button class="action" id="cancel-order" type="button">Отмена</button></div>
   <a class="action support-link" id="order-support" href="https://t.me/DitzzmBack" target="_blank" rel="noopener noreferrer" hidden>@DitzzmBack</a>
 </dialog>
 <script>
@@ -890,6 +890,8 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       $("confirm-order").textContent = kind === "test" ? "Подтвердить тест" : (orderIntent.attempted ? "Повторить оплату" : "Оплатить");
       $("cancel-order").textContent = "Отмена"; $("cancel-order").disabled = false;
       $("order-support").hidden = true;
+      $("order-payment").hidden = true;
+      $("order-payment").removeAttribute("href");
       dialog.showModal();
       $("cancel-order").focus();
     } catch { feedback("global-message", "Не удалось открыть безопасное подтверждение. Обнови Telegram или обратись в поддержку.", true); }
@@ -917,8 +919,12 @@ input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; flex: 0 0 
       orderKeys.delete(intent.signature);
       const id = result?.id ?? result?.order_id ?? result?.order?.id;
       if (selectedPayment === "crypto" && result.pay_url) {
-        feedback("order-feedback", `Счёт${id != null ? " № " + String(id) : ""} открыт: к оплате ${money(result.amount)}. После оплаты товар будет выдан автоматически.`);
-        if (app?.openLink) app.openLink(result.pay_url); else window.open(result.pay_url, "_blank", "noopener");
+        $("order-payment").href = result.pay_url;
+        $("order-payment").hidden = false;
+        feedback("order-feedback", `Счёт${id != null ? " № " + String(id) : ""} создан: к оплате ${money(result.amount)}. Если оплата не открылась, нажми «Перейти к оплате». После оплаты товар будет выдан автоматически.`);
+        try {
+          if (app?.openLink) app.openLink(result.pay_url); else window.open(result.pay_url, "_blank", "noopener");
+        } catch { /* The invoice remains accessible through the visible link. */ }
       } else feedback("order-feedback", intent.kind === "test"
         ? `Тестовая покупка${id != null ? " № " + String(id) : ""} выполнена. Бот отправил товар тебе в чат.`
         : `Заказ${id != null ? " № " + String(id) : ""} оплачен с баланса и будет выдан автоматически.`);
