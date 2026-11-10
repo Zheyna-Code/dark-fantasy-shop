@@ -773,16 +773,23 @@ $("order-status").addEventListener("change", renderOrders);
 $("user-search").addEventListener("input", renderUsers);
 $("create").addEventListener("click", createProduct);
 $("topup").addEventListener("click", async () => {
+  const control = $("topup");
+  if (control.disabled) return;
   const user_id = number($("user-id").value, null);
   const amount = number($("user-amount").value, null);
   if (!user_id || !amount) { feedback("users-feedback", "Нужны Telegram ID и сумма.", "error"); return; }
+  control.disabled = true;
   feedback("users-feedback", "Пополняем…");
   try {
     const result = await api("/api/admin/balance", { method: "POST", body: { user_id, amount } });
-    feedback("users-feedback", `Баланс пополнен, теперь у покупателя ${money(result.balance)}.`, "ok");
-    await loadAll();
+    const success = `Баланс покупателя ${user_id} пополнен, теперь ${money(result.balance)}.`;
+    feedback("users-feedback", success, "ok");
+    try { await loadAll(); }
+    catch { feedback("users-feedback", success + " Список не обновлён. Нажми «Обновить», не повторяй пополнение.", "ok"); }
   } catch (error) {
     feedback("users-feedback", error.message, "error");
+  } finally {
+    control.disabled = false;
   }
 });
 $("tabs").addEventListener("click", event => {
